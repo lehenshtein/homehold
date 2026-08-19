@@ -35,16 +35,29 @@ New projects on this VPS use a dedicated `6xxx` block, kept separate from
 ```
 frontend/          # vanilla TS + Vite
   index.html
-  src/main.ts       # renders hero + project grid from a static array
+  src/main.ts       # hero (auth UI) + project grid, all one render() pass
+  src/auth.ts        # login/logout/changePassword/createUser/fetchMe
+  src/api.ts          # fetch wrapper: base /api, injects token, throws on non-2xx
   src/style.css
-  Dockerfile         # multi-stage: vite build -> nginx:alpine
+  vite.config.ts       # dev-only: proxies /api/* -> localhost:6101
+  nginx.conf             # prod: same /api/* proxy, -> homehold-backend:6101
+  Dockerfile               # multi-stage: vite build -> nginx:alpine + nginx.conf
 backend/            # Express + TypeScript + Prisma
-  src/server.ts      # Express app, GET /ping health check
-  src/routes.ts       # router aggregator (empty so far, eneri-be pattern)
-  prisma/schema.prisma  # datasource postgresql; User model only so far
-  Dockerfile          # node:20-alpine multi-stage build
+  src/server.ts      # Express app; mounts addUserToRequest, /auth, /user; GET /ping
+  src/routes.ts       # router aggregator (AuthenticationRoutes, UserRoutes)
+  src/middleware/Authentication.ts  # addUserToRequest, requireAuthentication, requireAdmin
+  src/library/
+    prisma.ts          # shared PrismaClient singleton — import this, don't `new PrismaClient()` elsewhere
+    password.ts          # generateSalt/hashPassword (PBKDF2, same scheme as eneri-be)
+    jwt.ts                 # createToken/verifyToken (7d expiry, JWT_SIGN_KEY)
+  src/apps/
+    authentication/     # POST /auth/login, POST /auth/change-password (auth'd)
+    user/                 # GET /user/me (auth'd), POST /user (admin-only, creates account)
+  src/scripts/seedAdmin.ts  # idempotent: creates lehenshtein/admin only if it doesn't exist yet
+  prisma/schema.prisma  # datasource postgresql; User model (password+salt, role, isGuest)
+  Dockerfile          # node:20-alpine multi-stage, installs openssl (Prisma needs it on Alpine)
   .env.example
-docker-compose.yml    # homehold-db (postgres) + homehold-backend + homehold-frontend
+docker-compose.yml    # homehold-db (postgres, w/ healthcheck) + homehold-backend + homehold-frontend
 .env.example           # POSTGRES_USER/PASSWORD/DB for docker-compose.yml
 .github/workflows/main.yml
 ```
@@ -55,11 +68,79 @@ docker-compose.yml    # homehold-db (postgres) + homehold-backend + homehold-fro
   workflow's health check step
 - `src/routes.ts` router-aggregator pattern: each entity app's router gets
   imported and re-exported here, then mounted in `server.ts`
-- Auth (once implemented): JWT, PBKDF2 password hashing, ~7-day token
-  expiry, same shape as `eneri-be`'s `Authentication.ts` middleware
-- Guest accounts: issue a scoped JWT for a guest `User` row
-  (`isGuest: true`) without requiring registration — exact scoping/limits
-  TBD in Phase 1
+- Auth: JWT (7-day expiry, `JWT_SIGN_KEY`), PBKDF2 password hashing with a
+  per-user salt — same scheme as `eneri-be`'s `Authentication.ts`, except
+  the token payload/lookup key is `username` (eneri-be uses `email`), since
+  homehold has no email/registration flow (yet)
+- `addUserToRequest` is mounted globally in `server.ts` (before the route
+  mounts), so `req.user` is populated (or `undefined`) on every request —
+  same pattern as eneri-be
+- No Joi/`ValidateSchema` layer here — request bodies are checked with
+  plain `if` guards in the controllers instead, to keep the dependency
+  footprint down at this scaffold stage. Revisit if validation needs grow.
+
+## Auth — implemented (2026-08-19)
+
+No self-registration — accounts only come from an admin creating them.
+
+- **Bootstrap admin**: `lehenshtein` / `admin`, created by
+  `src/scripts/seedAdmin.ts` on first backend start (idempotent — only
+  creates it if the username doesn't already exist, so it never resets a
+  password that's since been changed). **Change this password after first
+  login.**
+- `POST /auth/login` `{ username, password }` -> `{ token, user }`
+- `POST /auth/change-password` `{ currentPassword, newPassword }`
+  (requires auth) -> updates the caller's own password
+- `GET /user/me` (requires auth) -> `{ username, role, isGuest }`
+- `POST /user` `{ username, password }` (requires **admin** role) -> creates
+  a new account with `role: 'user'` and the given temporary password; the
+  new user is expected to `POST /auth/change-password` after first login
+- Frontend (`src/main.ts`/`auth.ts`): token stored in `localStorage`
+  (`homehold_token` key), sent back as the raw value in an `authorization`
+  header (no `Bearer ` prefix — matches `eneri-be`'s convention). Session
+  restored on page load via `GET /user/me`; a 401 there clears the stored
+  token.
+- Guest accounts are still **not implemented** — `isGuest` exists on the
+  `User` model but nothing sets it yet; still Phase 1/2 work.
+
+### API routing: `/api/*` proxy, not a separate subdomain
+
+The frontend's own nginx container proxies `/api/*` -> `homehold-backend:6101`
+(stripping the prefix) over the internal Docker network — see
+`frontend/nginx.conf` (prod) and `frontend/vite.config.ts` (dev,
+`npm run dev`, same rewrite against `localhost:6101`). Frontend code always
+calls relative `/api/...` paths (`src/api.ts`), so it's identical in dev,
+Docker, and prod.
+
+**This means the VPS's host nginx (`homehold.conf`) needed no changes** —
+it already proxies everything on `homehold.website` to
+`127.0.0.1:6100` (the frontend container), which now internally forwards
+`/api/*` onward. The backend is still not reachable on its own subdomain
+(`api.homehold.website` — see Nginx/TLS section below); it doesn't need to
+be for this to work.
+
+### Prisma: `db push`, not migrations (deliberate, for now)
+
+The Docker entrypoint (`backend/Dockerfile` CMD) runs `npx prisma db push`
+on every start — directly syncs the DB schema to `schema.prisma`, no
+migration history table, no committed SQL migration files. This is
+Prisma's own recommended approach for early prototyping. **Move to real
+`prisma migrate` once this holds actual user data that must survive a
+schema change without risk of `db push` prompting for
+`--accept-data-loss`.**
+
+### Local `.env` gotcha (bit us once, worth remembering)
+
+`backend/.env`'s `DATABASE_URL` password must match root `.env`'s
+`POSTGRES_PASSWORD` **exactly**. Postgres only applies
+`POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` from env vars on the
+*first* start against an empty volume — after that, changing either `.env`
+file alone just makes the backend's credentials stop matching what's
+actually in Postgres, with an opaque `P1000: Authentication failed` error.
+If you need to actually rotate the password later, see "if i will change
+them, database will break?" reasoning: either `ALTER ROLE ... WITH
+PASSWORD` inside Postgres and update `.env` to match, or (only if there's
+no real data yet) `docker compose down -v` to wipe and reinit clean.
 
 ## Shared Database — Open Decision
 
@@ -117,8 +198,10 @@ frontend's.
 
 - [x] Phase 0: scaffold, static landing page, backend health check,
       `docker compose up --build` works end-to-end locally
-- [ ] Phase 1: real auth (register/login + guest account issuing a scoped
-      JWT without registration)
+- [x] Phase 1 (partial): admin-bootstrapped auth — login, change own
+      password, admin creates new accounts (see "Auth — implemented" above)
+- [ ] Phase 1 (remaining): guest account issuing a scoped JWT without
+      requiring an admin-created account
 - [ ] Phase 2: landing page wired to backend (project registry table
       instead of the hardcoded array in `frontend/src/main.ts`),
       account/profile page

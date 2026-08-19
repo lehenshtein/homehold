@@ -12,6 +12,11 @@ services:
     # Not published to the host by default. Uncomment for local psql access:
     # ports:
     #   - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
 
   homehold-backend:
     build: ./backend
@@ -20,7 +25,8 @@ services:
     env_file:
       - ./backend/.env
     depends_on:
-      - homehold-db
+      homehold-db:
+        condition: service_healthy
     ports:
       - "127.0.0.1:6101:6101"
 

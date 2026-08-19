@@ -44,24 +44,75 @@ header.hero h1 {
 
 .auth-actions {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
-.auth-actions button {
+.auth-status {
+  font-size: 0.85rem;
+  opacity: 0.75;
+  margin-right: 0.25rem;
+}
+
+.auth-actions button,
+.auth-form button {
   font: inherit;
   padding: 0.5rem 1rem;
   border-radius: 8px;
   border: 1px solid rgba(127, 127, 127, 0.4);
   background: transparent;
   color: inherit;
+  cursor: pointer;
+}
+
+.auth-actions button:disabled,
+.auth-form button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }
 
-.auth-actions button[data-variant="primary"] {
+.auth-actions button[data-variant="primary"],
+.auth-form button[data-variant="primary"] {
   background: #2f6fed;
   border-color: #2f6fed;
   color: #fff;
+}
+
+.auth-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+.auth-form input {
+  font: inherit;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid rgba(127, 127, 127, 0.4);
+  background: transparent;
+  color: inherit;
+  min-width: 0;
+  flex: 1 1 160px;
+}
+
+.auth-message {
+  font-size: 0.85rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: 8px;
+  margin: 0 0 1.5rem;
+}
+
+.auth-message-error {
+  background: rgba(220, 53, 69, 0.12);
+  color: #dc3545;
+}
+
+.auth-message-info {
+  background: rgba(47, 111, 237, 0.12);
+  color: #2f6fed;
 }
 
 h2.section-title {
