@@ -1,10 +1,12 @@
 // Prisma schema for the shared Homehold Postgres database.
 //
 // This database is intended to be shared across all pet projects hosted
-// under homehold.website. For now it only holds the `User` model needed
-// for future auth work (see CLAUDE.md roadmap). When a second pet project
-// needs its own tables, decide table-prefix vs. Postgres schema-per-project
-// before adding more models here.
+// under homehold.website. Notes (below) is the exception to "separate pet
+// project = separate schema convention" — it's not a separate pet project,
+// it's a feature of homehold itself, served at homehold.website/notes by
+// the same frontend/backend, so its tables just live here directly. When a
+// genuinely separate pet project needs its own tables, decide table-prefix
+// vs. Postgres schema-per-project before adding more models here.
 
 generator client {
   provider = "prisma-client-js"
@@ -25,4 +27,66 @@ model User {
   role      String   @default("user")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  notes      Note[]
+  noteShares NoteShare[]
+}
+
+enum NoteType {
+  note
+  todo
+}
+
+// - private:  only the owner
+// - public:   everyone — all registered users AND guest
+// - guests:   owner + the shared guest account only — hidden from other
+//             registered users, to keep guest-facing stuff out of their feed
+// - users:    owner + all registered (non-guest) users — NOT guest
+// - specific: owner + whoever is explicitly picked (NoteShare rows below)
+enum NoteVisibility {
+  private
+  public
+  guests
+  users
+  specific
+}
+
+model Note {
+  id         String         @id @default(uuid())
+  type       NoteType
+  title      String
+  content    String? // text body, only used when type = note
+  color      String // pastel hex, picked at creation, stays stable
+  visibility NoteVisibility @default(private)
+  ownerId    String
+  owner      User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  items      TodoItem[] // only used when type = todo
+  shares     NoteShare[] // only meaningful when visibility = specific
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+}
+
+model TodoItem {
+  id        String   @id @default(uuid())
+  noteId    String
+  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  text      String
+  done      Boolean  @default(false)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Explicit share grant, only used when Note.visibility = 'specific' — the
+// multiselect list of exactly who else can see it. Owner-only actions
+// (edit/delete/sharing changes) are enforced in the controller, not here.
+model NoteShare {
+  id        String   @id @default(uuid())
+  noteId    String
+  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([noteId, userId])
 }

@@ -5,6 +5,7 @@ import { requireAuthentication, requireAdmin } from '../../middleware/Authentica
 const router = express.Router();
 
 router.get('/me', requireAuthentication, controller.me);
+router.get('/', requireAuthentication, controller.list);
 router.post('/', requireAuthentication, requireAdmin, controller.create);
 
 export = router;

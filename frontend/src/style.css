@@ -1,6 +1,48 @@
 :root {
   color-scheme: light dark;
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Surfaces */
+  --bg: #f5f5f7;
+  --surface-1: #ffffff;
+  --surface-2: #eeeef1;
+  --text: #1a1a1a;
+  --text-muted: rgba(26, 26, 26, 0.65);
+  --border-soft: rgba(0, 0, 0, 0.12);
+
+  /* Board (the notes pinboard specifically — separate from generic surfaces
+     so it can read as its own "physical" thing in both themes) */
+  --board-bg: #ece4d8;
+  --board-texture: rgba(90, 70, 50, 0.14);
+  --board-shadow: rgba(0, 0, 0, 0.15);
+
+  /* Semantic tones — drive the whole .btn system, filters, links, badges */
+  --tone-primary: #3f5fe0;
+  --tone-success: #1f9d63;
+  --tone-danger: #dc3545;
+  --tone-warning: #b6790f;
+  --tone-neutral: #6b7280;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f0f13;
+    --surface-1: #1a1a20;
+    --surface-2: #212128;
+    --text: #f2f2f5;
+    --text-muted: rgba(242, 242, 245, 0.65);
+    --border-soft: rgba(255, 255, 255, 0.1);
+
+    --board-bg: #18161c;
+    --board-texture: rgba(255, 255, 255, 0.055);
+    --board-shadow: rgba(0, 0, 0, 0.65);
+
+    --tone-primary: #7c9bff;
+    --tone-success: #4ade80;
+    --tone-danger: #ff6b6b;
+    --tone-warning: #ffcc66;
+    --tone-neutral: #9aa0a6;
+  }
 }
 
 * {
@@ -10,15 +52,8 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: #f5f5f7;
-  color: #1a1a1a;
-}
-
-@media (prefers-color-scheme: dark) {
-  body {
-    background: #14141a;
-    color: #f0f0f0;
-  }
+  background: var(--bg);
+  color: var(--text);
 }
 
 .page {
@@ -42,6 +77,116 @@ header.hero h1 {
   letter-spacing: -0.02em;
 }
 
+/* ===== Button system =====
+   .btn + one variant (fill / stroke / text) + one tone
+   (primary / success / danger / warning / neutral). Optional .btn-sm and
+   .btn-icon modifiers. Deliberately not Material — no ripple, flat fill;
+   instead a soft tone-colored glow on fill, a tinted wash on stroke/text
+   hover, tiny lift on hover. */
+.btn {
+  --btn-tone: var(--tone-neutral);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 0.55rem 1.1rem;
+  border-radius: 10px;
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.btn:not(:disabled):active {
+  transform: translateY(0);
+}
+
+.btn-sm {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  border-radius: 8px;
+  gap: 0.3rem;
+}
+
+.btn-icon {
+  padding: 0.4rem;
+  width: 2rem;
+  height: 2rem;
+}
+
+.btn-icon.btn-sm {
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0.3rem;
+}
+
+.btn-primary {
+  --btn-tone: var(--tone-primary);
+}
+
+.btn-success {
+  --btn-tone: var(--tone-success);
+}
+
+.btn-danger {
+  --btn-tone: var(--tone-danger);
+}
+
+.btn-warning {
+  --btn-tone: var(--tone-warning);
+}
+
+.btn-neutral {
+  --btn-tone: var(--tone-neutral);
+}
+
+.btn-fill {
+  background: var(--btn-tone);
+  border-color: var(--btn-tone);
+  color: #0e0e12;
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--btn-tone) 40%, transparent);
+}
+
+.btn-fill:not(:disabled):hover {
+  box-shadow: 0 5px 18px color-mix(in srgb, var(--btn-tone) 50%, transparent);
+}
+
+.btn-stroke {
+  background: color-mix(in srgb, var(--btn-tone) 8%, transparent);
+  border-color: color-mix(in srgb, var(--btn-tone) 55%, transparent);
+  color: var(--btn-tone);
+}
+
+.btn-stroke:not(:disabled):hover {
+  background: color-mix(in srgb, var(--btn-tone) 16%, transparent);
+  border-color: var(--btn-tone);
+}
+
+.btn-text {
+  background: transparent;
+  border-color: transparent;
+  color: var(--btn-tone);
+}
+
+.btn-text:not(:disabled):hover {
+  background: color-mix(in srgb, var(--btn-tone) 12%, transparent);
+}
+
+/* ===== Auth (shared by landing + notes gate) ===== */
+
 .auth-actions {
   display: flex;
   align-items: center;
@@ -51,32 +196,8 @@ header.hero h1 {
 
 .auth-status {
   font-size: 0.85rem;
-  opacity: 0.75;
+  color: var(--text-muted);
   margin-right: 0.25rem;
-}
-
-.auth-actions button,
-.auth-form button {
-  font: inherit;
-  padding: 0.5rem 1rem;
-  border-radius: 8px;
-  border: 1px solid rgba(127, 127, 127, 0.4);
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-
-.auth-actions button:disabled,
-.auth-form button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.auth-actions button[data-variant="primary"],
-.auth-form button[data-variant="primary"] {
-  background: #2f6fed;
-  border-color: #2f6fed;
-  color: #fff;
 }
 
 .auth-form {
@@ -91,9 +212,9 @@ header.hero h1 {
   font: inherit;
   padding: 0.5rem 0.75rem;
   border-radius: 8px;
-  border: 1px solid rgba(127, 127, 127, 0.4);
-  background: transparent;
-  color: inherit;
+  border: 1px solid var(--border-soft);
+  background: var(--surface-2);
+  color: var(--text);
   min-width: 0;
   flex: 1 1 160px;
 }
@@ -106,22 +227,24 @@ header.hero h1 {
 }
 
 .auth-message-error {
-  background: rgba(220, 53, 69, 0.12);
-  color: #dc3545;
+  background: color-mix(in srgb, var(--tone-danger) 15%, transparent);
+  color: var(--tone-danger);
 }
 
 .auth-message-info {
-  background: rgba(47, 111, 237, 0.12);
-  color: #2f6fed;
+  background: color-mix(in srgb, var(--tone-primary) 15%, transparent);
+  color: var(--tone-primary);
 }
 
 h2.section-title {
   font-size: 0.85rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  opacity: 0.6;
+  color: var(--text-muted);
   margin: 0 0 1rem;
 }
+
+/* ===== Landing: project grid ===== */
 
 .project-grid {
   display: grid;
@@ -138,8 +261,8 @@ h2.section-title {
   aspect-ratio: 1 / 1;
   padding: 1.25rem;
   border-radius: 18px;
-  border: 1px solid rgba(127, 127, 127, 0.25);
-  background: rgba(127, 127, 127, 0.06);
+  border: 1px solid var(--border-soft);
+  background: var(--surface-2);
   text-decoration: none;
   color: inherit;
   text-align: center;
@@ -148,7 +271,7 @@ h2.section-title {
 
 .project-card:hover {
   transform: translateY(-2px);
-  border-color: #2f6fed;
+  border-color: var(--tone-primary);
 }
 
 .project-card .icon {
@@ -156,7 +279,7 @@ h2.section-title {
   height: 56px;
   border-radius: 14px;
   object-fit: cover;
-  background: rgba(127, 127, 127, 0.12);
+  background: var(--surface-1);
 }
 
 .project-card .icon-placeholder {
@@ -165,9 +288,26 @@ h2.section-title {
   justify-content: center;
   font-size: 1.75rem;
   line-height: 1;
-  color: rgba(127, 127, 127, 0.6);
-  border: 1px dashed rgba(127, 127, 127, 0.4);
+  color: var(--text-muted);
+  border: 1px dashed var(--border-soft);
   background: transparent;
+}
+
+.project-card .icon-emoji {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.notes-nav-link {
+  font-size: 0.85rem;
+  text-decoration: none;
+  color: inherit;
+  padding: 0.4rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
 }
 
 .project-card .name {
@@ -177,7 +317,7 @@ h2.section-title {
 
 .project-card .description {
   font-size: 0.75rem;
-  opacity: 0.7;
+  color: var(--text-muted);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -192,5 +332,502 @@ h2.section-title {
 footer {
   margin-top: 3rem;
   font-size: 0.8rem;
-  opacity: 0.5;
+  color: var(--text-muted);
+}
+
+/* ===== Notes page ===== */
+
+.notes-gate {
+  max-width: 480px;
+  margin: 4rem auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.notes-gate .auth-form,
+.notes-gate .auth-actions {
+  justify-content: center;
+  margin-top: 1.25rem;
+}
+
+.notes-back-link {
+  display: inline-block;
+  margin-top: 1.5rem;
+  font-size: 0.85rem;
+  color: inherit;
+  opacity: 0.7;
+  text-decoration: none;
+}
+
+.notes-back-link:hover {
+  opacity: 1;
+}
+
+.notes-page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+.notes-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+
+.notes-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  flex: 1;
+}
+
+.notes-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.notes-filters {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.25rem;
+  background: var(--surface-2);
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+}
+
+.filter-button {
+  font: inherit;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.filter-button.active {
+  background: var(--tone-primary);
+  color: #0e0e12;
+}
+
+.notes-create-actions {
+  display: flex;
+  gap: 0.6rem;
+}
+
+/* Playful pastel creation buttons — deliberately distinct from the
+   semantic .btn system, they're "make a sticker" actions, not status
+   actions, so they get the same pastel palette as the stickers. */
+.pastel-button {
+  font: inherit;
+  padding: 0.65rem 1.2rem;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #2a2a2a;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.pastel-button:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+}
+
+.pastel-yellow {
+  background: linear-gradient(160deg, #fff8d6, #ffe985);
+}
+
+.pastel-blue {
+  background: linear-gradient(160deg, #e3f4ff, #a9dcff);
+}
+
+/* Pinboard: a dot-grid textured dark/warm "board" (not literal brown cork —
+   works in both themes via --board-* tokens, and is deliberately larger
+   than a typical widget so it reads as the centerpiece of the page). */
+.corkboard {
+  position: relative;
+  min-height: 560px;
+  padding: 2.5rem;
+  border-radius: 22px;
+  background-color: var(--board-bg);
+  background-image: radial-gradient(circle, var(--board-texture) 1.6px, transparent 1.6px);
+  background-size: 26px 26px;
+  box-shadow: inset 0 0 80px var(--board-shadow), 0 12px 36px rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-soft);
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 1.75rem;
+}
+
+.corkboard-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0;
+}
+
+.sticker {
+  position: relative;
+  width: 172px;
+  min-height: 150px;
+  padding: 1.6rem 1.1rem 1.1rem;
+  border: none;
+  border-radius: 4px;
+  box-shadow: 3px 6px 14px rgba(0, 0, 0, 0.4);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  transform: rotate(var(--rotate, 0deg));
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  color: #2a2a2a;
+}
+
+.sticker:hover {
+  transform: rotate(var(--rotate, 0deg)) scale(1.05);
+  box-shadow: 4px 9px 20px rgba(0, 0, 0, 0.5);
+  z-index: 2;
+}
+
+.sticker-pin {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ff8a8a, #c33 70%);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.sticker-type {
+  font-size: 1.2rem;
+}
+
+.sticker-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  word-break: break-word;
+}
+
+.sticker-author {
+  font-size: 0.7rem;
+  opacity: 0.65;
+  margin-top: auto;
+}
+
+.sticker-shared {
+  font-size: 0.65rem;
+  opacity: 0.8;
+}
+
+/* ===== Note panel (create form + detail view) =====
+   The detail view specifically is styled to still read as "the sticker,
+   opened up": a colored pin, a colored top edge + soft glow using the
+   note's own pastel color (--note-color, set inline per note), while the
+   card body stays on the app's normal dark surface. */
+.note-panel {
+  position: relative;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 1.75rem;
+  border-radius: 16px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-soft);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.25);
+}
+
+.note-panel h2 {
+  margin-top: 0;
+}
+
+.note-detail {
+  padding-top: 2.25rem;
+  border-color: color-mix(in srgb, var(--note-color, var(--tone-primary)) 45%, var(--border-soft));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--note-color, var(--tone-primary)) 35%, transparent),
+    0 16px 44px color-mix(in srgb, var(--note-color, var(--tone-primary)) 18%, rgba(0, 0, 0, 0.35));
+}
+
+.note-detail::before {
+  content: '';
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, color-mix(in srgb, var(--note-color, #fff) 70%, white), var(--note-color, var(--tone-primary)) 75%);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
+}
+
+.note-detail::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 1.75rem;
+  right: 1.75rem;
+  height: 3px;
+  border-radius: 0 0 3px 3px;
+  background: var(--note-color, var(--tone-primary));
+  opacity: 0.85;
+}
+
+.note-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.note-form.inline-form {
+  flex-direction: row;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.note-form.inline-form input {
+  flex: 1;
+}
+
+.note-form input,
+.note-form textarea,
+.note-form select {
+  font: inherit;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  background: var(--surface-2);
+  color: var(--text);
+  resize: vertical;
+}
+
+.note-form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.note-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.note-detail-header h2 {
+  margin: 0;
+}
+
+.note-title-input {
+  font: inherit;
+  font-size: 1.25rem;
+  font-weight: 700;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  flex: 1;
+  min-width: 0;
+}
+
+.note-title-input:hover,
+.note-title-input:focus {
+  border-color: var(--border-soft);
+}
+
+.note-detail-author {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+#note-content-textarea {
+  width: 100%;
+  font: inherit;
+  padding: 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  background: var(--surface-2);
+  color: var(--text);
+  resize: vertical;
+  margin-bottom: 0.75rem;
+}
+
+.note-content-readonly {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.todo-items {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.todo-item-text,
+.todo-item-text-readonly {
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-item-text {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+}
+
+.todo-item-text:hover,
+.todo-item-text:focus {
+  border-color: var(--border-soft);
+}
+
+.todo-item-text-readonly.done {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+/* ===== Sharing panel ===== */
+
+.note-sharing {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px dashed var(--border-soft);
+}
+
+.note-sharing h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.visibility-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.visibility-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  border: 1.5px solid var(--border-soft);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.visibility-option:hover {
+  background: var(--surface-2);
+}
+
+.visibility-option.selected {
+  border-color: var(--tone-primary);
+  background: color-mix(in srgb, var(--tone-primary) 10%, transparent);
+}
+
+.visibility-option input {
+  margin-top: 0.2rem;
+  accent-color: var(--tone-primary);
+}
+
+.visibility-option-icon {
+  font-size: 1.1rem;
+  line-height: 1.3;
+}
+
+.visibility-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.visibility-option-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.visibility-option-help {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.user-multiselect {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.85rem;
+  margin-bottom: 1rem;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+}
+
+.user-multiselect-empty {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.user-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.user-checkbox:has(input:checked) {
+  border-color: var(--tone-primary);
+  background: color-mix(in srgb, var(--tone-primary) 14%, transparent);
+}
+
+.user-checkbox input {
+  accent-color: var(--tone-primary);
+}
+
+.note-detail-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-soft);
 }

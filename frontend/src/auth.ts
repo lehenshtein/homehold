@@ -22,6 +22,13 @@ export async function login(username: string, password: string): Promise<void> {
   setToken(token);
 }
 
+// Everyone who clicks "Continue as guest" shares one single "guest"
+// account (see backend authentication.controller.ts) — no password needed.
+export async function guestLogin(): Promise<void> {
+  const { token } = await apiFetch<{ token: string }>('/auth/guest', { method: 'POST' });
+  setToken(token);
+}
+
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
   await apiFetch('/auth/change-password', {
     method: 'POST',

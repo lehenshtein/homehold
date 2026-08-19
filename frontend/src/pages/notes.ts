@@ -1,0 +1,606 @@
+import { fetchMe, isLoggedIn, login, guestLogin, logout, type CurrentUser } from '../auth';
+import { escapeHtml, formValue, onFormSubmit } from '../dom-utils';
+import {
+  listNotes, listUsers, getNote, createNote, updateNote, deleteNote,
+  addItem, updateItem, deleteItem, updateSharing,
+  VISIBILITY_OPTIONS,
+  type NoteSummary, type NoteDetail, type NoteFilter, type NoteType, type NoteVisibility, type RegisteredUser,
+} from '../notes-api';
+
+type View =
+  | { kind: 'board' }
+  | { kind: 'create'; noteType: NoteType }
+  | { kind: 'detail'; noteId: string };
+
+interface SharingDraft {
+  visibility: NoteVisibility;
+  userIds: Set<string>;
+}
+
+interface State {
+  checkingSession: boolean;
+  user: CurrentUser | null;
+  authPanel: null | 'login';
+  filter: NoteFilter;
+  notes: NoteSummary[] | null;
+  view: View;
+  detail: NoteDetail | null;
+  registeredUsers: RegisteredUser[] | null;
+  sharingDraft: SharingDraft | null;
+  busy: boolean;
+  error: string | null;
+  info: string | null;
+}
+
+const state: State = {
+  checkingSession: isLoggedIn(),
+  user: null,
+  authPanel: null,
+  filter: 'all',
+  notes: null,
+  view: { kind: 'board' },
+  detail: null,
+  registeredUsers: null,
+  sharingDraft: null,
+  busy: false,
+  error: null,
+  info: null,
+};
+
+// Deterministic pseudo-random tilt per note id, so a sticker's rotation
+// stays stable across re-renders instead of jittering on every render().
+function hashRotation(id: string): number {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return (Math.abs(hash) % 13) - 6; // -6..6 degrees
+}
+
+const VISIBILITY_ICON: Record<NoteVisibility, string> = {
+  private: '🔒', public: '🌍', guests: '🕶️', users: '👥', specific: '🎯',
+};
+
+// ---------- rendering ----------
+
+function renderAuthGate(): string {
+  const formOrButtons = state.authPanel === 'login'
+    ? `
+      <form id="notes-login-form" class="auth-form">
+        <input name="username" placeholder="Username" autocomplete="username" required />
+        <input name="password" type="password" placeholder="Password" autocomplete="current-password" required />
+        <button type="submit" class="btn btn-fill btn-primary" ${state.busy ? 'disabled' : ''}>Log in</button>
+        <button type="button" class="btn btn-text btn-neutral" id="notes-cancel-login">Cancel</button>
+      </form>
+    `
+    : `
+      <div class="auth-actions">
+        <button type="button" class="btn btn-stroke btn-neutral" id="notes-guest-button" ${state.busy ? 'disabled' : ''}>Continue as guest</button>
+        <button type="button" class="btn btn-fill btn-primary" id="notes-open-login">Log in</button>
+      </div>
+    `;
+
+  return `
+    <div class="notes-gate">
+      <h1>📌 Homehold Notes</h1>
+      <p>Log in to view the pinboard.</p>
+      ${formOrButtons}
+      ${state.error ? `<p class="auth-message auth-message-error">${escapeHtml(state.error)}</p>` : ''}
+      <a href="/" class="notes-back-link">&larr; Back to Homehold</a>
+    </div>
+  `;
+}
+
+function renderSticker(note: NoteSummary): string {
+  const rotation = hashRotation(note.id);
+  return `
+    <button type="button" class="sticker" data-note-id="${note.id}" style="--rotate: ${rotation}deg; background: ${note.color};">
+      <span class="sticker-pin" aria-hidden="true"></span>
+      <span class="sticker-type">${note.type === 'todo' ? '✅' : '📝'}</span>
+      <span class="sticker-title">${escapeHtml(note.title)}</span>
+      <span class="sticker-author">by ${escapeHtml(note.ownerUsername)}</span>
+      ${note.isSharedByMe ? `<span class="sticker-shared" title="${escapeHtml(VISIBILITY_OPTIONS.find((o) => o.value === note.visibility)?.label ?? '')}">${VISIBILITY_ICON[note.visibility]} shared</span>` : ''}
+    </button>
+  `;
+}
+
+function renderBoard(): string {
+  const notesList = state.notes ?? [];
+  return `
+    <div class="notes-toolbar">
+      <div class="notes-filters">
+        <button type="button" class="filter-button ${state.filter === 'all' ? 'active' : ''}" data-filter="all">All</button>
+        <button type="button" class="filter-button ${state.filter === 'mine' ? 'active' : ''}" data-filter="mine">My notes</button>
+        <button type="button" class="filter-button ${state.filter === 'shared' ? 'active' : ''}" data-filter="shared">Shared with me</button>
+      </div>
+      <div class="notes-create-actions">
+        <button type="button" class="pastel-button pastel-yellow" id="create-note-button">+ Note</button>
+        <button type="button" class="pastel-button pastel-blue" id="create-todo-button">+ To-do list</button>
+      </div>
+    </div>
+    ${state.error ? `<p class="auth-message auth-message-error">${escapeHtml(state.error)}</p>` : ''}
+    ${state.info ? `<p class="auth-message auth-message-info">${escapeHtml(state.info)}</p>` : ''}
+    <div class="corkboard">
+      ${state.notes === null
+        ? '<p class="corkboard-empty">Loading…</p>'
+        : notesList.length === 0
+          ? '<p class="corkboard-empty">No notes here yet — pin one!</p>'
+          : notesList.map(renderSticker).join('')
+      }
+    </div>
+  `;
+}
+
+function renderCreateForm(): string {
+  const isTodo = state.view.kind === 'create' && state.view.noteType === 'todo';
+  return `
+    <div class="note-panel">
+      <h2>${isTodo ? 'New to-do list' : 'New note'}</h2>
+      <form id="create-note-form" class="note-form">
+        <input name="title" placeholder="Title" required maxlength="80" />
+        ${isTodo
+          ? `<textarea name="items" placeholder="One item per line" rows="6"></textarea>`
+          : `<textarea name="content" placeholder="Write your note…" rows="8"></textarea>`
+        }
+        <div class="note-form-actions">
+          <button type="submit" class="btn btn-fill btn-primary" ${state.busy ? 'disabled' : ''}>Pin it</button>
+          <button type="button" class="btn btn-text btn-neutral" id="cancel-create">Cancel</button>
+        </div>
+      </form>
+    </div>
+  `;
+}
+
+function renderSharingPanel(): string {
+  if (!state.detail?.isMine || !state.sharingDraft) return '';
+  const draft = state.sharingDraft;
+
+  const visibilityCards = VISIBILITY_OPTIONS.map((opt) => `
+    <label class="visibility-option ${draft.visibility === opt.value ? 'selected' : ''}">
+      <input type="radio" name="visibility" value="${opt.value}" ${draft.visibility === opt.value ? 'checked' : ''} />
+      <span class="visibility-option-icon">${opt.icon}</span>
+      <span class="visibility-option-body">
+        <span class="visibility-option-label">${escapeHtml(opt.label)}</span>
+        <span class="visibility-option-help">${escapeHtml(opt.help)}</span>
+      </span>
+    </label>
+  `).join('');
+
+  const multiselect = draft.visibility === 'specific'
+    ? `
+      <div class="user-multiselect">
+        ${state.registeredUsers === null
+          ? '<span class="user-multiselect-empty">Loading users…</span>'
+          : state.registeredUsers.length === 0
+            ? '<span class="user-multiselect-empty">No other registered users yet.</span>'
+            : state.registeredUsers.map((u) => `
+                <label class="user-checkbox">
+                  <input type="checkbox" value="${u.id}" ${draft.userIds.has(u.id) ? 'checked' : ''} />
+                  ${escapeHtml(u.username)}
+                </label>
+              `).join('')
+        }
+      </div>
+    `
+    : '';
+
+  return `
+    <div class="note-sharing">
+      <h3>Sharing</h3>
+      <div class="visibility-picker">${visibilityCards}</div>
+      ${multiselect}
+      <button type="button" class="btn btn-fill btn-primary btn-sm" id="save-sharing-button" ${state.busy ? 'disabled' : ''}>Save sharing</button>
+    </div>
+  `;
+}
+
+function renderDetail(): string {
+  const note = state.detail;
+  if (!note) {
+    return `<div class="note-panel"><p>Loading…</p></div>`;
+  }
+  const isOwner = note.isMine;
+
+  const body = note.type === 'todo'
+    ? `
+      <ul class="todo-items">
+        ${note.items.map((item) => `
+          <li class="todo-item" data-item-id="${item.id}">
+            <input type="checkbox" class="todo-item-checkbox" ${item.done ? 'checked' : ''} ${isOwner ? '' : 'disabled'} />
+            ${isOwner
+              ? `<input type="text" class="todo-item-text" value="${escapeHtml(item.text)}" maxlength="300" />`
+              : `<span class="todo-item-text-readonly ${item.done ? 'done' : ''}">${escapeHtml(item.text)}</span>`
+            }
+            ${isOwner ? `<button type="button" class="btn btn-text btn-danger btn-icon btn-sm todo-item-delete" title="Delete item">✕</button>` : ''}
+          </li>
+        `).join('')}
+      </ul>
+      ${isOwner ? `
+        <form id="add-item-form" class="note-form inline-form">
+          <input name="text" placeholder="Add item…" maxlength="300" required />
+          <button type="submit" class="btn btn-fill btn-primary btn-sm">Add</button>
+        </form>
+      ` : ''}
+    `
+    : (isOwner
+      ? `
+        <textarea id="note-content-textarea" rows="10" maxlength="5000">${escapeHtml(note.content || '')}</textarea>
+        <button type="button" class="btn btn-fill btn-primary btn-sm" id="save-content-button">Save</button>
+      `
+      : `<p class="note-content-readonly">${escapeHtml(note.content || '') || '<em>Empty note</em>'}</p>`
+    );
+
+  return `
+    <div class="note-panel note-detail" style="--note-color: ${note.color};">
+      <div class="note-detail-header">
+        ${isOwner
+          ? `<input id="note-title-input" class="note-title-input" value="${escapeHtml(note.title)}" maxlength="80" />`
+          : `<h2>${escapeHtml(note.title)}</h2>`
+        }
+        <span class="note-detail-author">by ${escapeHtml(note.ownerUsername)}</span>
+      </div>
+
+      ${body}
+
+      ${renderSharingPanel()}
+
+      ${state.error ? `<p class="auth-message auth-message-error">${escapeHtml(state.error)}</p>` : ''}
+      ${state.info ? `<p class="auth-message auth-message-info">${escapeHtml(state.info)}</p>` : ''}
+
+      <div class="note-detail-actions">
+        <button type="button" class="btn btn-stroke btn-neutral" id="close-detail">Close</button>
+        ${isOwner ? `<button type="button" class="btn btn-fill btn-danger" id="delete-note-button">Delete</button>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderUnsafe(): void {
+  const app = document.querySelector<HTMLDivElement>('#app');
+  if (!app) return;
+
+  if (state.checkingSession) {
+    app.innerHTML = `<div class="notes-gate"><p>Checking session…</p></div>`;
+    return;
+  }
+
+  if (!state.user) {
+    app.innerHTML = renderAuthGate();
+    attachGateHandlers();
+    return;
+  }
+
+  const header = `
+    <header class="notes-header">
+      <a href="/" class="notes-back-link">&larr; Homehold</a>
+      <h1>📌 Notes</h1>
+      <div class="auth-actions">
+        <span class="auth-status">Signed in as <strong>${escapeHtml(state.user.username)}</strong>${state.user.isGuest ? ' (guest)' : ''}</span>
+        <button type="button" class="btn btn-text btn-danger" id="notes-logout-button">Log out</button>
+      </div>
+    </header>
+  `;
+
+  let body = '';
+  if (state.view.kind === 'board') body = renderBoard();
+  else if (state.view.kind === 'create') body = renderCreateForm();
+  else if (state.view.kind === 'detail') body = renderDetail();
+
+  app.innerHTML = `<div class="notes-page">${header}${body}</div>`;
+  attachBoardHandlers();
+}
+
+// render() is called from several fire-and-forget async callbacks (e.g.
+// listUsers().then(...) in openNote) that have no surrounding try/catch of
+// their own. If renderUnsafe() throws there, it becomes a silent unhandled
+// promise rejection — the DOM just never updates again, looking like an
+// infinite "Loading…" hang with no visible error at all. This wrapper
+// guarantees render() itself never throws: on failure it logs to the
+// console AND paints a visible fallback into #app, so a bug here is loud
+// instead of silent.
+function render(): void {
+  try {
+    renderUnsafe();
+  } catch (err) {
+    console.error('[notes] render() failed:', err);
+    const app = document.querySelector<HTMLDivElement>('#app');
+    if (app) {
+      const message = err instanceof Error ? err.message : String(err);
+      app.innerHTML = `
+        <div class="notes-page">
+          <p class="auth-message auth-message-error">Something broke rendering this page: ${escapeHtml(message)}. Check the browser console for details, or <a href="/notes">reload</a>.</p>
+        </div>
+      `;
+    }
+  }
+}
+
+// ---------- action helpers ----------
+
+// Same rule as landing.ts/dom-utils.ts: render() rebuilds the DOM, so
+// anything read from it must be captured before calling this, not inside
+// `action`.
+async function withBusy(action: () => Promise<void>): Promise<void> {
+  state.busy = true;
+  state.error = null;
+  render();
+  try {
+    await action();
+  } catch (err) {
+    state.error = err instanceof Error ? err.message : 'Something went wrong';
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+async function loadNotes(): Promise<void> {
+  state.notes = await listNotes(state.filter);
+}
+
+// Guards against a genuine network-level hang (not a throw — those are
+// already caught) leaving the "Specific people" picker on "Loading users…"
+// forever with no way to know something's wrong.
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Timed out loading users')), ms)),
+  ]);
+}
+
+async function openNote(noteId: string): Promise<void> {
+  state.view = { kind: 'detail', noteId };
+  state.detail = null;
+  state.registeredUsers = null;
+  state.sharingDraft = null;
+  state.error = null;
+  state.info = null;
+  render();
+  try {
+    const note = await getNote(noteId);
+    state.detail = note;
+    if (note.isMine) {
+      state.sharingDraft = { visibility: note.visibility, userIds: new Set((note.sharedWith ?? []).map((u) => u.id)) };
+      withTimeout(listUsers(), 8000).then((users) => {
+        state.registeredUsers = users;
+        render();
+      }).catch((err) => {
+        state.registeredUsers = [];
+        state.error = `Could not load the user list for sharing: ${err instanceof Error ? err.message : 'unknown error'}`;
+        render();
+      });
+    }
+  } catch (err) {
+    state.error = err instanceof Error ? err.message : 'Could not open note';
+    state.view = { kind: 'board' };
+  } finally {
+    render();
+  }
+}
+
+function backToBoard(): void {
+  state.view = { kind: 'board' };
+  state.detail = null;
+  state.registeredUsers = null;
+  state.sharingDraft = null;
+  state.error = null;
+  state.info = null;
+  render();
+  void withBusy(loadNotes);
+}
+
+// ---------- event wiring ----------
+
+function attachGateHandlers(): void {
+  document.getElementById('notes-open-login')?.addEventListener('click', () => {
+    state.authPanel = 'login';
+    state.error = null;
+    render();
+  });
+
+  document.getElementById('notes-cancel-login')?.addEventListener('click', () => {
+    state.authPanel = null;
+    state.error = null;
+    render();
+  });
+
+  document.getElementById('notes-guest-button')?.addEventListener('click', () => {
+    void withBusy(async () => {
+      await guestLogin();
+      state.user = await fetchMe();
+      await loadNotes();
+    });
+  });
+
+  onFormSubmit('notes-login-form', (form) => {
+    void withBusy(async () => {
+      await login(formValue(form, 'username'), formValue(form, 'password'));
+      state.user = await fetchMe();
+      state.authPanel = null;
+      await loadNotes();
+    });
+  });
+}
+
+function attachBoardHandlers(): void {
+  document.getElementById('notes-logout-button')?.addEventListener('click', () => {
+    logout();
+    state.user = null;
+    state.notes = null;
+    state.view = { kind: 'board' };
+    render();
+  });
+
+  // --- board view ---
+  document.querySelectorAll<HTMLButtonElement>('.filter-button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const filter = btn.dataset.filter as NoteFilter;
+      state.filter = filter;
+      void withBusy(loadNotes);
+    });
+  });
+
+  document.getElementById('create-note-button')?.addEventListener('click', () => {
+    state.view = { kind: 'create', noteType: 'note' };
+    state.error = null;
+    render();
+  });
+
+  document.getElementById('create-todo-button')?.addEventListener('click', () => {
+    state.view = { kind: 'create', noteType: 'todo' };
+    state.error = null;
+    render();
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('.sticker').forEach((sticker) => {
+    sticker.addEventListener('click', () => {
+      const noteId = sticker.dataset.noteId;
+      if (noteId) void openNote(noteId);
+    });
+  });
+
+  // --- create view ---
+  document.getElementById('cancel-create')?.addEventListener('click', () => {
+    state.view = { kind: 'board' };
+    state.error = null;
+    render();
+  });
+
+  onFormSubmit('create-note-form', (form) => {
+    if (state.view.kind !== 'create') return;
+    const noteType = state.view.noteType;
+    const title = formValue(form, 'title');
+    const content = noteType === 'note' ? formValue(form, 'content') : undefined;
+    const items = noteType === 'todo'
+      ? formValue(form, 'items').split('\n').map((s) => s.trim()).filter(Boolean)
+      : undefined;
+
+    void withBusy(async () => {
+      const created = await createNote({ type: noteType, title, content, items });
+      state.detail = created;
+      state.sharingDraft = { visibility: created.visibility, userIds: new Set() };
+      state.view = { kind: 'detail', noteId: created.id };
+      state.info = 'Pinned!';
+    });
+  });
+
+  // --- detail view ---
+  document.getElementById('close-detail')?.addEventListener('click', backToBoard);
+
+  document.getElementById('delete-note-button')?.addEventListener('click', () => {
+    if (!state.detail) return;
+    const noteId = state.detail.id;
+    if (!window.confirm('Delete this note? This cannot be undone.')) return;
+    void withBusy(async () => {
+      await deleteNote(noteId);
+      state.view = { kind: 'board' };
+      state.detail = null;
+      state.info = 'Note deleted.';
+      await loadNotes();
+    });
+  });
+
+  const titleInput = document.getElementById('note-title-input') as HTMLInputElement | null;
+  titleInput?.addEventListener('change', () => {
+    if (!state.detail) return;
+    const noteId = state.detail.id;
+    const title = titleInput.value;
+    void withBusy(async () => {
+      state.detail = await updateNote(noteId, { title });
+    });
+  });
+
+  document.getElementById('save-content-button')?.addEventListener('click', () => {
+    if (!state.detail) return;
+    const noteId = state.detail.id;
+    const textarea = document.getElementById('note-content-textarea') as HTMLTextAreaElement | null;
+    const content = textarea?.value ?? '';
+    void withBusy(async () => {
+      state.detail = await updateNote(noteId, { content });
+      state.info = 'Saved.';
+    });
+  });
+
+  onFormSubmit('add-item-form', (form) => {
+    if (!state.detail) return;
+    const noteId = state.detail.id;
+    const text = formValue(form, 'text');
+    void withBusy(async () => {
+      state.detail = await addItem(noteId, text);
+    });
+  });
+
+  document.querySelectorAll<HTMLLIElement>('.todo-item').forEach((li) => {
+    const itemId = li.dataset.itemId;
+    if (!itemId || !state.detail) return;
+    const noteId = state.detail.id;
+
+    li.querySelector<HTMLInputElement>('.todo-item-checkbox')?.addEventListener('change', (e) => {
+      const done = (e.target as HTMLInputElement).checked;
+      void withBusy(async () => {
+        state.detail = await updateItem(noteId, itemId, { done });
+      });
+    });
+
+    li.querySelector<HTMLInputElement>('.todo-item-text')?.addEventListener('change', (e) => {
+      const text = (e.target as HTMLInputElement).value;
+      void withBusy(async () => {
+        state.detail = await updateItem(noteId, itemId, { text });
+      });
+    });
+
+    li.querySelector<HTMLButtonElement>('.todo-item-delete')?.addEventListener('click', () => {
+      void withBusy(async () => {
+        state.detail = await deleteItem(noteId, itemId);
+      });
+    });
+  });
+
+  // --- sharing panel ---
+  document.querySelectorAll<HTMLInputElement>('.visibility-option input[type="radio"]').forEach((radio) => {
+    radio.addEventListener('change', (e) => {
+      if (!state.sharingDraft) return;
+      state.sharingDraft.visibility = (e.target as HTMLInputElement).value as NoteVisibility;
+      render();
+    });
+  });
+
+  document.querySelectorAll<HTMLInputElement>('.user-checkbox input[type="checkbox"]').forEach((checkbox) => {
+    checkbox.addEventListener('change', (e) => {
+      if (!state.sharingDraft) return;
+      const target = e.target as HTMLInputElement;
+      if (target.checked) state.sharingDraft.userIds.add(target.value);
+      else state.sharingDraft.userIds.delete(target.value);
+      render();
+    });
+  });
+
+  document.getElementById('save-sharing-button')?.addEventListener('click', () => {
+    if (!state.detail || !state.sharingDraft) return;
+    const noteId = state.detail.id;
+    const { visibility, userIds } = state.sharingDraft;
+    void withBusy(async () => {
+      state.detail = await updateSharing(noteId, { visibility, userIds: [...userIds] });
+      state.info = 'Sharing updated.';
+    });
+  });
+}
+
+export async function initNotes(): Promise<void> {
+  render();
+
+  if (state.checkingSession) {
+    try {
+      state.user = await fetchMe();
+    } catch {
+      logout();
+      state.user = null;
+    } finally {
+      state.checkingSession = false;
+    }
+  }
+
+  if (state.user) {
+    await withBusy(loadNotes);
+  } else {
+    render();
+  }
+}

@@ -5,6 +5,7 @@ import { createToken } from '../../library/jwt';
 import { AuthRequest } from '../../middleware/Authentication';
 
 const MIN_PASSWORD_LENGTH = 4;
+const GUEST_USERNAME = 'guest';
 
 const login = async (req: Request, res: Response) => {
   const { username, password } = req.body;
@@ -13,8 +14,30 @@ const login = async (req: Request, res: Response) => {
   }
 
   const user = await prisma.user.findUnique({ where: { username } });
-  if (!user || hashPassword(password, user.salt) !== user.password) {
+  // isGuest accounts have a random, never-shared password — they can only
+  // be entered through POST /auth/guest, not this endpoint.
+  if (!user || user.isGuest || hashPassword(password, user.salt) !== user.password) {
     return res.status(400).json({ message: 'Invalid username/password' });
+  }
+
+  return res.status(200).json({
+    token: createToken(user.username),
+    user: { username: user.username, role: user.role, isGuest: user.isGuest },
+  });
+};
+
+// No password needed — everyone who clicks "Continue as guest" shares the
+// same single "guest" account (created lazily on first use). This is
+// deliberate, not a bug: homehold's notes feature caps the guest to one
+// note + one to-do list globally, auto-expiring after 72h.
+const guestLogin = async (_req: Request, res: Response) => {
+  let user = await prisma.user.findUnique({ where: { username: GUEST_USERNAME } });
+  if (!user) {
+    const salt = generateSalt();
+    const password = hashPassword(generateSalt(), salt); // random, never revealed
+    user = await prisma.user.create({
+      data: { username: GUEST_USERNAME, password, salt, role: 'user', isGuest: true },
+    });
   }
 
   return res.status(200).json({
@@ -45,4 +68,4 @@ const changePassword = async (req: AuthRequest, res: Response) => {
   return res.status(200).json({ message: 'Password updated' });
 };
 
-export default { login, changePassword };
+export default { login, guestLogin, changePassword };

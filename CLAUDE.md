@@ -33,34 +33,52 @@ New projects on this VPS use a dedicated `6xxx` block, kept separate from
 ## Directory Structure
 
 ```
-frontend/          # vanilla TS + Vite
+frontend/          # vanilla TS + Vite, no client router — see "Routing" below
   index.html
-  src/main.ts       # hero (auth UI) + project grid, all one render() pass
-  src/auth.ts        # login/logout/changePassword/createUser/fetchMe
-  src/api.ts          # fetch wrapper: base /api, injects token, throws on non-2xx
+  src/main.ts        # thin router: pathname -> initLanding() or initNotes()
+  src/pages/
+    landing.ts          # hero (auth UI) + project grid
+    notes.ts             # pinboard app (see "Notes feature" below)
+  src/auth.ts         # login/guestLogin/logout/changePassword/createUser/fetchMe
+  src/notes-api.ts     # typed client for /note/* endpoints
+  src/api.ts            # fetch wrapper: base /api, injects token, throws on non-2xx
+  src/dom-utils.ts        # escapeHtml, formValue, onFormSubmit (shared safe-form-read helper)
   src/style.css
   vite.config.ts       # dev-only: proxies /api/* -> localhost:6101
   nginx.conf             # prod: same /api/* proxy, -> homehold-backend:6101
   Dockerfile               # multi-stage: vite build -> nginx:alpine + nginx.conf
 backend/            # Express + TypeScript + Prisma
-  src/server.ts      # Express app; mounts addUserToRequest, /auth, /user; GET /ping
-  src/routes.ts       # router aggregator (AuthenticationRoutes, UserRoutes)
+  src/server.ts      # Express app; mounts addUserToRequest, /auth, /user, /note; GET /ping
+  src/routes.ts       # router aggregator (AuthenticationRoutes, UserRoutes, NoteRoutes)
   src/middleware/Authentication.ts  # addUserToRequest, requireAuthentication, requireAdmin
   src/library/
     prisma.ts          # shared PrismaClient singleton — import this, don't `new PrismaClient()` elsewhere
     password.ts          # generateSalt/hashPassword (PBKDF2, same scheme as eneri-be)
     jwt.ts                 # createToken/verifyToken (7d expiry, JWT_SIGN_KEY)
   src/apps/
-    authentication/     # POST /auth/login, POST /auth/change-password (auth'd)
+    authentication/     # POST /auth/login, POST /auth/guest, POST /auth/change-password
     user/                 # GET /user/me (auth'd), POST /user (admin-only, creates account)
+    note/                  # GET/POST /note, GET/PUT/DELETE /note/:id, items, share/unshare
+      note.lib.ts            # PASTEL_COLORS, cleanupExpiredGuestNotes, serializeSummary/Detail
   src/scripts/seedAdmin.ts  # idempotent: creates lehenshtein/admin only if it doesn't exist yet
-  prisma/schema.prisma  # datasource postgresql; User model (password+salt, role, isGuest)
+  prisma/schema.prisma  # User, Note, TodoItem, NoteShare — see "Notes feature" below
   Dockerfile          # node:20-alpine multi-stage, installs openssl (Prisma needs it on Alpine)
   .env.example
 docker-compose.yml    # homehold-db (postgres, w/ healthcheck) + homehold-backend + homehold-frontend
 .env.example           # POSTGRES_USER/PASSWORD/DB for docker-compose.yml
+package.json            # root-only: orchestrates hot-reload dev via `concurrently` (see "Local Development")
 .github/workflows/main.yml
 ```
+
+### Routing (no client router, deliberately)
+
+`/notes` isn't a build-time page or an SPA route — `main.ts` just checks
+`window.location.pathname` and calls `initLanding()` or `initNotes()`.
+Every navigation (including clicking a `<a href="/notes">` link) is a
+normal full page load; nginx (`frontend/nginx.conf`, prod) and Vite (dev)
+both fall back unmatched paths to `index.html`, which re-runs the same
+router. No history/pushState handling needed. Fine for a two-page app —
+revisit if a third page shows up.
 
 ## Conventions (carried over from `eneri-be` for consistency)
 
@@ -100,8 +118,14 @@ No self-registration — accounts only come from an admin creating them.
   header (no `Bearer ` prefix — matches `eneri-be`'s convention). Session
   restored on page load via `GET /user/me`; a 401 there clears the stored
   token.
-- Guest accounts are still **not implemented** — `isGuest` exists on the
-  `User` model but nothing sets it yet; still Phase 1/2 work.
+- **Guest accounts are implemented.** `POST /auth/guest` (no body) logs in
+  as a single shared `guest` account — created lazily on first use, never
+  registered any other way. Regular `POST /auth/login` explicitly rejects
+  `isGuest` users (its random password is never revealed), so `guest` can
+  only be reached through this endpoint. Every visitor who clicks "Continue
+  as guest" gets the *same* account/identity — deliberate, see "Notes
+  feature" below for why (one shared guest note + one shared guest to-do,
+  not per-visitor).
 
 ### API routing: `/api/*` proxy, not a separate subdomain
 
@@ -118,6 +142,140 @@ it already proxies everything on `homehold.website` to
 `/api/*` onward. The backend is still not reachable on its own subdomain
 (`api.homehold.website` — see Nginx/TLS section below); it doesn't need to
 be for this to work.
+
+## Notes feature — implemented (2026-08-19)
+
+A shared pinboard at `homehold.website/notes` — sticky notes and to-do
+lists, ownable, shareable between users (including the shared `guest`
+identity). Not a separate pet project (see "Shared Database" below) — its
+tables (`Note`, `TodoItem`, `NoteShare`) live directly in homehold's own
+schema, and it's served by homehold's own frontend/backend.
+
+### Data model (`prisma/schema.prisma`)
+
+- `Note` — `type` (`note` | `todo`), `title`, `content` (text body, `note`
+  type only), `color` (pastel hex, random at creation, stays stable),
+  `visibility` (see below), `ownerId`
+- `TodoItem` — belongs to a `Note`, `text` + `done` + `position`
+- `NoteShare` — join table, `(noteId, userId)` unique — only meaningful
+  when `visibility = 'specific'`; the exact set of people who can see it
+
+### Sharing model: 5 visibility levels, not free-text sharing
+
+`Note.visibility` (enum, default `private`):
+
+| Value | Who can see it | Why it exists |
+|---|---|---|
+| `private` | owner only | default |
+| `public` | **everyone** — all registered users + guest | "share with everyone" |
+| `guests` | owner + the shared `guest` account, **not** other registered users | lets you hand something to guest without it cluttering every registered user's "shared with me" list |
+| `users` | owner + all registered users, **not** guest | broad share, deliberately excluding the noisy shared guest identity |
+| `specific` | owner + whoever's explicitly picked (`NoteShare` rows) | the multiselect — picks from `GET /user`'s list, which itself excludes guest |
+
+Guest is **never individually selectable** in the `specific` picker
+(`GET /user` excludes `isGuest` users, and `note.controller.ts`'s
+`updateSharing` also filters `isGuest: false` server-side even if a client
+sent a guest id anyway) — the only way to reach guest is the dedicated
+`guests` visibility level. This was a deliberate design decision (confirmed
+with the project owner) to keep guest access as one clear toggle rather
+than a name in a crowded user-picker.
+
+Switching visibility away from `specific` clears any existing `NoteShare`
+rows for that note (`updateSharing` always does
+`deleteMany` → optionally `createMany` → `update` in one transaction) — so
+switching back to `specific` later starts from an empty pick list, not
+stale state.
+
+### Permissions
+
+- **Owner only**: edit title/content, add/edit/delete to-do items, delete
+  the note, change sharing (`PUT /note/:id/sharing`)
+- **Everyone else who can see it**: read-only — can open and view, cannot
+  modify anything (backend enforces this in `note.controller.ts`'s
+  `loadNote()` + `isOwner` checks on every mutating route; frontend also
+  hides the edit/delete controls, but the backend is the actual gate)
+- List filters (`GET /note?filter=`): `mine` (owned), `shared` (visible via
+  any of the 4 non-private paths above, excluding your own), `all` (union)
+  — matches the pinboard's All / My notes / Shared with me toggle. The
+  where-clause logic lives once in `note.lib.ts`'s `visibilityWhere()`,
+  reused by both `list` and `loadNote`'s `isNoteVisibleTo()` so they can't
+  drift apart.
+
+### Guest limits: one note + one to-do, 72h auto-expiry
+
+Because every guest visitor shares the *one* `guest` account (see "Auth"
+above), guest-owned content is capped **globally**, not per-visitor:
+- At most 1 note **and** 1 to-do list owned by `guest` at a time (separate
+  counters per `type` — `note.controller.ts`'s `create` checks
+  `prisma.note.count({ where: { ownerId, type } })`)
+- `cleanupExpiredGuestNotes()` (`note.lib.ts`) deletes any of `guest`'s
+  notes older than 72h. **No cron job** — it just runs lazily at the top of
+  `GET /note` (list) and `POST /note` (create), so it fires "each time the
+  board initializes, someone goes there", per spec. Verified manually by
+  backdating a guest note's `createdAt` in Postgres and confirming the next
+  list call swept it (and that creation was allowed again afterward).
+
+### API (`/note` and `/user`, all routes require auth)
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/note?filter=all\|mine\|shared` | summaries for the pinboard |
+| POST | `/note` | `{ type, title, content? }` or `{ type: 'todo', title, items?: string[] }` |
+| GET | `/note/:id` | full detail incl. items/sharedWith (owner-visible only) |
+| PUT | `/note/:id` | `{ title?, content? }` — owner only |
+| DELETE | `/note/:id` | owner only |
+| POST/PUT/DELETE | `/note/:id/items[/:itemId]` | add/edit/delete a to-do item — owner only |
+| PUT | `/note/:id/sharing` | `{ visibility, userIds? }` — owner only, see "Sharing model" above |
+| GET | `/user` | `[{id, username}]`, excludes guest + caller — powers the sharing multiselect |
+
+### Frontend UI notes
+
+- **Design system** (`style.css` top): CSS custom properties —
+  `--surface-*`/`--text*`/`--border-soft` for generic UI, separate
+  `--board-*` tokens just for the pinboard, and `--tone-primary/success/
+  danger/warning/neutral` driving a reusable `.btn` system:
+  `.btn` + one of `.btn-fill`/`.btn-stroke`/`.btn-text` (fill = solid
+  tone-colored bg with a soft glow shadow, stroke = tinted outline, text =
+  ghost) + one tone class, optional `.btn-sm`/`.btn-icon`. Uses
+  `color-mix()` for the tinted hover/glow states — deliberately not
+  Material (no ripple, no flat elevation cards). Applied consistently
+  across landing + notes; the "+ Note"/"+ To-do list" `.pastel-button`s are
+  a deliberate *exception* — they're playful sticker-colored actions, not
+  semantic-status buttons, so they stay outside the tone system.
+- **Pinboard** (`.corkboard`): dot-grid texture via a single
+  `radial-gradient`, using `--board-bg`/`--board-texture` tokens (dark by
+  default, since that's how the owner actually uses it — no more literal
+  brown cork blobs, which looked bad against a dark page). `min-height:
+  560px`, page `max-width: 1180px` — deliberately large, it's the
+  centerpiece. Stickers get a small deterministic tilt (`hashRotation()` —
+  hashes the note id, not `Math.random()`, so it doesn't jitter on
+  re-render) and a pin dot. A sticker shows a badge (🌍/🕶️/👥/🎯 per
+  visibility) when `isSharedByMe` is true.
+- **Detail panel reads as "the sticker, opened"**: `.note-detail` sets
+  `--note-color` inline (the note's own pastel color) and the stylesheet
+  uses it for a colored border tint, a colored glow (`box-shadow` via
+  `color-mix`), a pin (`::before`) and a colored accent strip (`::after`)
+  — while the card body itself stays on the normal dark `--surface-1`, per
+  "still dark, but with the feeling of actually opening a sticker."
+- **Sharing panel**: `VISIBILITY_OPTIONS` (`notes-api.ts`) drives a radio
+  card list with per-option help text (`.visibility-option`); picking
+  `specific` reveals a checkbox "chip" list (`.user-checkbox`) fed by
+  `GET /user`. Changing the radio/checkboxes only updates local
+  `state.sharingDraft` and re-renders — no API call until "Save sharing" is
+  clicked (`PUT /note/:id/sharing`).
+- Clicking a sticker opens an in-page detail view (no navigation) —
+  `state.view` in `notes.ts` switches between `board` / `create` / `detail`
+  and re-renders `#app`'s content, same single-page-app pattern as
+  `landing.ts`.
+- All forms (create note/todo, add item) use the same `onFormSubmit`/
+  `withBusy` pattern as `landing.ts` — see `dom-utils.ts` and the "login
+  form sends empty values" postmortem two sections up for why form values
+  must be captured *before* any re-render, not looked up from the DOM
+  afterward.
+- Checkbox/inline-edit interactions on to-do items and the sharing
+  radios/checkboxes all read `e.target`'s value directly inside the
+  handler — safe by the same rule, since that's synchronous at event-fire
+  time regardless of any later re-render.
 
 ### Prisma: `db push`, not migrations (deliberate, for now)
 
@@ -181,43 +339,73 @@ docker compose up -d --build
 (`.env` / `backend/.env` already exist on the VPS with generated secrets —
 don't overwrite them with `.env.example` again.)
 
-### Nginx / TLS — partially done
+### Nginx / TLS — done
 
-Live: `/etc/nginx/sites-available/homehold.conf` (symlinked into
-`sites-enabled/`) proxies `homehold.website` -> `127.0.0.1:6100`, HTTPS via
-a Let's Encrypt cert (certbot, auto-renews, expires 2026-11-17). `eneri`/
-`dreich`/`salt-ash`/`n8n` nginx configs were not touched.
+Both live, Let's Encrypt certs via certbot (auto-renew, expire
+2026-11-17). `eneri`/`dreich`/`salt-ash`/`n8n` nginx configs were not
+touched by either.
+- `/etc/nginx/sites-available/homehold.conf` -> `homehold.website` ->
+  `127.0.0.1:6100` (frontend; handles `/api/*` internally, see above)
+- `/etc/nginx/sites-available/api.homehold.conf` -> `api.homehold.website`
+  -> `127.0.0.1:6101` (backend directly — not used by homehold's own
+  frontend, only for external consumers: other services, direct `curl`,
+  a future mobile client, etc.)
 
-**Not done**: `api.homehold.website` -> `127.0.0.1:6101`. No Cloudflare DNS
-record exists yet for the `api` subdomain, so the backend isn't publicly
-exposed — only reachable at `127.0.0.1:6101` on the VPS itself. Add the DNS
-record first, then add the nginx block + cert the same way as the
-frontend's.
+Note: as of this writing the VPS is still running whatever backend/frontend
+code was last pushed to `dev` — the notes feature only goes live there once
+this is committed/pushed and the runner deploys it.
 
 ## Roadmap
 
 - [x] Phase 0: scaffold, static landing page, backend health check,
       `docker compose up --build` works end-to-end locally
-- [x] Phase 1 (partial): admin-bootstrapped auth — login, change own
-      password, admin creates new accounts (see "Auth — implemented" above)
-- [ ] Phase 1 (remaining): guest account issuing a scoped JWT without
-      requiring an admin-created account
+- [x] Phase 1: full auth — admin-bootstrapped login, change own password,
+      admin creates new accounts, guest login (see "Auth — implemented")
+- [x] Notes feature (not originally in this roadmap, built 2026-08-19): see
+      "Notes feature — implemented" above
 - [ ] Phase 2: landing page wired to backend (project registry table
-      instead of the hardcoded array in `frontend/src/main.ts`),
+      instead of the hardcoded array in `pages/landing.ts`),
       account/profile page
-- [ ] Phase 3+: onboard first real pet project, resolve the shared-DB
-      schema/prefix convention above
+- [ ] Phase 3+: onboard first real *external* pet project (Notes doesn't
+      count — it's part of homehold itself, see its section above),
+      resolve the shared-DB schema/prefix convention below
 
 ## Local Development
 
+Two modes — pick based on what you're doing:
+
+**Hot-reload dev** (day-to-day feature work — Vite HMR + `nodemon`
+auto-restart, no image rebuilds). One-time setup, then `npm run dev` every
+time:
 ```bash
-# Frontend only
-cd frontend && npm install && npm run dev   # localhost:5173
+npm run install:all
+cp .env.example .env
+cp backend/.env.development.example backend/.env   # NOTE: not .env.example — see below
 
-# Backend only (needs a reachable Postgres; point DATABASE_URL at it)
-cd backend && npm install && npm run watch  # localhost:6101
+npm run dev   # localhost:5173 (frontend) + localhost:6101 (backend), color-coded logs
+```
+The root `package.json`'s `dev` script (via `concurrently`) does 3 things:
+`docker compose up -d homehold-db` (Postgres, published on host port
+`5433` for this purpose), then runs `backend`'s and `frontend`'s own `dev`
+scripts together. Backend's `dev` script chains `prisma db push` (syncs
+schema) → idempotent admin seed → `nodemon`. Run just one side with
+`npm run dev:backend` / `npm run dev:frontend` (still needs
+`npm run dev:db` running first).
 
-# Full stack via Docker
+`backend/.env.development.example` differs from `backend/.env.example`
+only in `DATABASE_URL`'s host: `localhost:5433` (what `docker-compose.yml`
+publishes `homehold-db` on) instead of `homehold-db` (the Docker-network
+hostname, unreachable from outside Docker). Verified this whole flow
+end-to-end (`db push` synced, seed ran idempotently, nodemon restarted on
+file touch, Vite proxy reached the backend) before writing it down here —
+also hit and fixed an orphaned-process gotcha along the way: killing the
+top-level `npm run dev` PID doesn't kill the `nodemon`/`vite` children it
+spawned via `concurrently`; use `pkill -f "nodemon|vite|concurrently"` (or
+just close the terminal) to actually free the ports.
+
+**Full Docker stack** (matches prod exactly — use this to sanity-check
+before pushing, not for iterating):
+```bash
 cp .env.example .env && cp backend/.env.example backend/.env
-docker compose up --build
+docker compose up -d --build
 ```

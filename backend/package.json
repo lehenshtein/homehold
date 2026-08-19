@@ -7,7 +7,9 @@
     "build": "prisma generate && tsc",
     "watch": "nodemon --watch src --ext ts --exec ts-node src/server.ts",
     "start": "node build/server.js",
-    "seed:admin": "node build/scripts/seedAdmin.js"
+    "seed:admin": "node build/scripts/seedAdmin.js",
+    "seed:admin:dev": "ts-node src/scripts/seedAdmin.ts",
+    "dev": "prisma db push && npm run seed:admin:dev && npm run watch"
   },
   "dependencies": {
     "cors": "^2.8.5",

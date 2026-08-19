@@ -36,4 +36,18 @@ const create = async (req: AuthRequest, res: Response) => {
   return res.status(201).json({ username: user.username, role: user.role });
 };
 
-export default { me, create };
+// Any authenticated user (not just admins) — powers the notes feature's
+// "specific users" sharing multiselect. Excludes guest (guest access goes
+// through the dedicated 'guests' visibility level, not individual picking)
+// and excludes the caller themselves (can't share with yourself).
+const list = async (req: AuthRequest, res: Response) => {
+  const user = req.user!;
+  const users = await prisma.user.findMany({
+    where: { isGuest: false, NOT: { id: user.id } },
+    select: { id: true, username: true },
+    orderBy: { username: 'asc' },
+  });
+  return res.status(200).json(users);
+};
+
+export default { me, create, list };
