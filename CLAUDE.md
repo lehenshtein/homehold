@@ -20,6 +20,16 @@ system — including a guest account — used across those pet projects.
 - Database: **PostgreSQL, one instance shared by all pet projects** (unlike
   `eneri-be`'s MongoDB, which is dedicated to that project alone)
 
+## Ports
+
+New projects on this VPS use a dedicated `6xxx` block, kept separate from
+`eneri`/`eneri-be` (`3000`/`4000`) and the unrelated `salt-ash` project
+(`4100`/`4101`) to avoid any collision or confusion:
+- `homehold-frontend` -> host `127.0.0.1:6100` (container port 80, nginx)
+- `homehold-backend` -> host `127.0.0.1:6101` (container port 6101, `PORT` env)
+- `homehold-db` -> not published to the host by default
+- `dreich` (sibling repo) -> host `127.0.0.1:6001`
+
 ## Directory Structure
 
 ```
@@ -68,7 +78,7 @@ Do not add project-specific tables to `schema.prisma` until this is decided.
 Mirrors the `eneri` / `eneri-be` deploy pattern used on the same VPS:
 self-hosted GitHub Actions runner, push to `main` -> `docker compose up -d
 --build` for all three services, health check against `/ping` (backend,
-port 3100) and `/` (frontend, port 4100), rollback via `pre-deploy-*` git
+port 6101) and `/` (frontend, port 6100), rollback via `pre-deploy-*` git
 tags. See `.github/workflows/main.yml`.
 
 **This workflow is currently inert** — no self-hosted runner is registered
@@ -91,7 +101,7 @@ server {
     listen 80;
     server_name homehold.website;
     location / {
-        proxy_pass http://127.0.0.1:4100;
+        proxy_pass http://127.0.0.1:6100;
     }
 }
 
@@ -99,7 +109,7 @@ server {
     listen 80;
     server_name api.homehold.website;
     location / {
-        proxy_pass http://127.0.0.1:3100;
+        proxy_pass http://127.0.0.1:6101;
     }
 }
 # then TLS via certbot / existing cert flow, same as eneri.com.ua / api.eneri.com.ua
@@ -127,7 +137,7 @@ split — needs a Cloudflare DNS record added for the `api` subdomain
 cd frontend && npm install && npm run dev   # localhost:5173
 
 # Backend only (needs a reachable Postgres; point DATABASE_URL at it)
-cd backend && npm install && npm run watch  # localhost:3100
+cd backend && npm install && npm run watch  # localhost:6101
 
 # Full stack via Docker
 cp .env.example .env && cp backend/.env.example backend/.env

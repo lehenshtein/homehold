@@ -34,8 +34,8 @@ jobs:
       - name: Health check
         run: |
           sleep 10
-          curl -sf http://localhost:3100/ping || (docker compose logs --tail 30 && exit 1)
-          curl -sf http://localhost:4100 || (docker compose logs --tail 30 && exit 1)
+          curl -sf http://localhost:6101/ping || (docker compose logs --tail 30 && exit 1)
+          curl -sf http://localhost:6100 || (docker compose logs --tail 30 && exit 1)
 
       - name: Clean up old images
         run: docker image prune -f

@@ -12,5 +12,5 @@ COPY --from=builder /app/build ./build
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/package*.json ./
 RUN npm install --omit=dev && npx prisma generate
-EXPOSE 3100
+EXPOSE 6101
 CMD ["node", "build/server.js"]

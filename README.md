@@ -13,8 +13,8 @@ cp .env.example .env
 cp backend/.env.example backend/.env
 docker compose up --build -d
 
-curl 127.0.0.1:3100/ping   # -> ok
-curl 127.0.0.1:4100        # -> landing page HTML
+curl 127.0.0.1:6101/ping   # -> ok
+curl 127.0.0.1:6100        # -> landing page HTML
 ```
 
 ## Structure
