@@ -27,11 +27,17 @@ export interface RegisteredUser {
   username: string;
 }
 
+export interface TagCount {
+  tag: string;
+  count: number;
+}
+
 export interface NoteSummary {
   id: string;
   type: NoteType;
   title: string;
   color: string;
+  tags: string[];
   visibility: NoteVisibility;
   ownerUsername: string;
   isMine: boolean;
@@ -53,8 +59,17 @@ export interface NoteDetail extends NoteSummary {
   sharedWith?: RegisteredUser[];
 }
 
-export function listNotes(filter: NoteFilter): Promise<NoteSummary[]> {
-  return apiFetch<NoteSummary[]>(`/note?filter=${filter}`);
+export function listNotes(filter: NoteFilter, search = ''): Promise<NoteSummary[]> {
+  const params = new URLSearchParams({ filter });
+  if (search.trim()) params.set('search', search.trim());
+  return apiFetch<NoteSummary[]>(`/note?${params}`);
+}
+
+// The caller's own tags with usage counts, most-used first. Fetched once
+// per page load and filtered client-side for the type-ahead, so typing a
+// tag never fires a request per keystroke.
+export function listTags(): Promise<TagCount[]> {
+  return apiFetch<TagCount[]>('/note/tags');
 }
 
 export function listUsers(): Promise<RegisteredUser[]> {
@@ -65,11 +80,11 @@ export function getNote(id: string): Promise<NoteDetail> {
   return apiFetch<NoteDetail>(`/note/${id}`);
 }
 
-export function createNote(payload: { type: NoteType; title: string; content?: string; items?: string[] }): Promise<NoteDetail> {
+export function createNote(payload: { type: NoteType; title: string; content?: string; items?: string[]; tags?: string[] }): Promise<NoteDetail> {
   return apiFetch<NoteDetail>('/note', { method: 'POST', body: JSON.stringify(payload) });
 }
 
-export function updateNote(id: string, payload: { title?: string; content?: string }): Promise<NoteDetail> {
+export function updateNote(id: string, payload: { title?: string; content?: string; tags?: string[] }): Promise<NoteDetail> {
   return apiFetch<NoteDetail>(`/note/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
 }
 

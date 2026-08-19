@@ -57,6 +57,10 @@ model Note {
   title      String
   content    String? // text body, only used when type = note
   color      String // pastel hex, picked at creation, stays stable
+  // Postgres scalar list. Always stored normalized (trimmed, lowercased,
+  // deduped — see normalizeTags in note.lib.ts) so `has` lookups are exact
+  // and "Work"/"work" can't become two different tags.
+  tags       String[]       @default([])
   visibility NoteVisibility @default(private)
   ownerId    String
   owner      User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)

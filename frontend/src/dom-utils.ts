@@ -19,3 +19,13 @@ export function onFormSubmit(formId: string, action: (form: HTMLFormElement) => 
     action(e.target as HTMLFormElement);
   });
 }
+
+// Surgically replaces ONE container's contents instead of re-rendering the
+// whole page. Essential for type-ahead: the app's normal render() blows away
+// #app.innerHTML, which would destroy the very <input> being typed into and
+// drop focus/caret after each keystroke. Update only the dropdown/chip
+// containers around the input, never the input itself.
+export function setHtml(id: string, html: string): void {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = html;
+}

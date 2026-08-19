@@ -4,7 +4,7 @@ import prisma from '../../library/prisma';
 import { AuthRequest } from '../../middleware/Authentication';
 import {
   cleanupExpiredGuestNotes, randomColor, serializeSummary, serializeDetail,
-  noteInclude, visibilityWhere, isNoteVisibleTo, VALID_VISIBILITIES,
+  noteInclude, visibilityWhere, isNoteVisibleTo, VALID_VISIBILITIES, normalizeTags,
 } from './note.lib';
 
 const MAX_TITLE_LENGTH = 80;
@@ -17,12 +17,30 @@ const list = async (req: AuthRequest, res: Response) => {
   await cleanupExpiredGuestNotes();
 
   const filter = (req.query.filter as string) || 'all';
-  const where =
+  const visibilityScope =
     filter === 'mine'
       ? { ownerId: user.id }
       : filter === 'shared'
         ? { ownerId: { not: user.id }, OR: visibilityWhere(user) }
         : { OR: [{ ownerId: user.id }, ...visibilityWhere(user)] };
+
+  // Free-text search matches either the title (case-insensitive substring)
+  // or an exact tag. AND-ed with the visibility scope above so searching can
+  // never widen what you're allowed to see.
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  const where = search
+    ? {
+        AND: [
+          visibilityScope,
+          {
+            OR: [
+              { title: { contains: search, mode: 'insensitive' as const } },
+              { tags: { has: search.toLowerCase() } },
+            ],
+          },
+        ],
+      }
+    : visibilityScope;
 
   const notes = await prisma.note.findMany({
     where,
@@ -33,9 +51,32 @@ const list = async (req: AuthRequest, res: Response) => {
   return res.status(200).json(notes.map((n) => serializeSummary(n, user.id)));
 };
 
+// The caller's own tags with usage counts, most-used first — powers the
+// "5 most used" clickable cloud and the type-ahead helper. Prisma can't
+// groupBy array elements, so counting happens here; at personal-board scale
+// (tens/hundreds of notes) that's cheaper than dropping to raw SQL.
+const listTags = async (req: AuthRequest, res: Response) => {
+  const user = req.user!;
+  const notes = await prisma.note.findMany({
+    where: { ownerId: user.id },
+    select: { tags: true },
+  });
+
+  const counts = new Map<string, number>();
+  for (const note of notes) {
+    for (const tag of note.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  }
+
+  const tags = [...counts.entries()]
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+
+  return res.status(200).json(tags);
+};
+
 const create = async (req: AuthRequest, res: Response) => {
   const user = req.user!;
-  const { type, title, content, items } = req.body;
+  const { type, title, content, items, tags } = req.body;
 
   if (type !== 'note' && type !== 'todo') {
     return res.status(400).json({ message: 'type must be "note" or "todo"' });
@@ -64,6 +105,7 @@ const create = async (req: AuthRequest, res: Response) => {
       title: title.trim(),
       content: type === 'note' ? String(content || '').slice(0, MAX_CONTENT_LENGTH) : null,
       color: randomColor(),
+      tags: normalizeTags(tags),
       ownerId: user.id,
       items:
         type === 'todo' && Array.isArray(items)
@@ -103,8 +145,8 @@ const update = async (req: AuthRequest, res: Response) => {
   if (!note) return res.status(404).json({ message: 'Note not found' });
   if (!isOwner) return res.status(403).json({ message: 'You can only edit your own notes' });
 
-  const { title, content } = req.body;
-  const data: { title?: string; content?: string } = {};
+  const { title, content, tags } = req.body;
+  const data: { title?: string; content?: string; tags?: string[] } = {};
   if (title !== undefined) {
     if (!title || String(title).trim().length === 0 || String(title).length > MAX_TITLE_LENGTH) {
       return res.status(400).json({ message: `Title is required (max ${MAX_TITLE_LENGTH} chars)` });
@@ -116,6 +158,9 @@ const update = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Note content is too long' });
     }
     data.content = String(content);
+  }
+  if (tags !== undefined) {
+    data.tags = normalizeTags(tags);
   }
 
   const updated = await prisma.note.update({
@@ -240,4 +285,4 @@ const updateSharing = async (req: AuthRequest, res: Response) => {
   return res.status(200).json(serializeDetail(updated!, user.id));
 };
 
-export default { list, create, read, update, remove, addItem, updateItem, deleteItem, updateSharing };
+export default { list, listTags, create, read, update, remove, addItem, updateItem, deleteItem, updateSharing };

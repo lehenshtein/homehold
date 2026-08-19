@@ -155,7 +155,7 @@ schema, and it's served by homehold's own frontend/backend.
 
 - `Note` — `type` (`note` | `todo`), `title`, `content` (text body, `note`
   type only), `color` (pastel hex, random at creation, stays stable),
-  `visibility` (see below), `ownerId`
+  `tags` (see below), `visibility` (see below), `ownerId`
 - `TodoItem` — belongs to a `Note`, `text` + `done` + `position`
 - `NoteShare` — join table, `(noteId, userId)` unique — only meaningful
   when `visibility = 'specific'`; the exact set of people who can see it
@@ -186,10 +186,43 @@ rows for that note (`updateSharing` always does
 switching back to `specific` later starts from an empty pick list, not
 stale state.
 
+### Tags & search (added 2026-08-19)
+
+`Note.tags` is a **Postgres scalar list** (`String[]`), not a normalized
+`Tag` table — right call at this scale, and `db push` handles it. Revisit
+only if tags need their own metadata (colors, descriptions, renames).
+
+**Always stored normalized** by `normalizeTags()` (`note.lib.ts`): trimmed,
+lowercased, inner whitespace → `-`, deduped, each capped at
+`MAX_TAG_LENGTH` (24), list capped at `MAX_TAGS` (10). So `"  Groceries "`,
+`"HOME"` and `"two words"` store as `groceries`, `home`, `two-words`, and
+`tags: { has: x }` lookups are always exact — no case-variant splitting.
+`normalizeTag()` in `pages/notes.ts` mirrors this client-side so the chip
+you see is exactly what gets saved.
+
+**Search** is one extra `search` param on the existing `GET /note`, not a
+separate endpoint: `title contains (case-insensitive) OR tags has (exact)`,
+**AND-ed** with the existing visibility scope. That ordering matters —
+searching can never widen what you're allowed to see (verified: a guest
+searching for a term in someone's private note gets `[]`, and only starts
+matching once that note is made public).
+
+**`GET /note/tags`** returns the *caller's own* tags with usage counts,
+most-used first — powers the "5 most used" clickable cloud. Prisma can't
+`groupBy` array elements, so counting happens in JS over the user's own
+notes; at personal-board scale that beats dropping to raw SQL `unnest`.
+Note this is deliberately per-owner: your cloud never suggests tags from
+notes merely shared *with* you.
+
+**Route-ordering trap**: `router.get('/tags')` MUST stay above
+`router.get('/:id')` in `note.router.ts` — Express matches in registration
+order, so `/:id` would otherwise swallow `/tags` and try to look up a note
+with id `"tags"`. There's a comment on it; don't reorder.
+
 ### Permissions
 
-- **Owner only**: edit title/content, add/edit/delete to-do items, delete
-  the note, change sharing (`PUT /note/:id/sharing`)
+- **Owner only**: edit title/content, edit tags, add/edit/delete to-do
+  items, delete the note, change sharing (`PUT /note/:id/sharing`)
 - **Everyone else who can see it**: read-only — can open and view, cannot
   modify anything (backend enforces this in `note.controller.ts`'s
   `loadNote()` + `isOwner` checks on every mutating route; frontend also
@@ -219,10 +252,11 @@ above), guest-owned content is capped **globally**, not per-visitor:
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/note?filter=all\|mine\|shared` | summaries for the pinboard |
-| POST | `/note` | `{ type, title, content? }` or `{ type: 'todo', title, items?: string[] }` |
+| GET | `/note?filter=all\|mine\|shared&search=` | summaries for the pinboard; `search` matches title (ci substring) or exact tag |
+| GET | `/note/tags` | `[{tag, count}]` — caller's own tags, most-used first. **Must be routed above `/:id`** |
+| POST | `/note` | `{ type, title, content?, tags? }` or `{ type: 'todo', title, items?: string[], tags? }` |
 | GET | `/note/:id` | full detail incl. items/sharedWith (owner-visible only) |
-| PUT | `/note/:id` | `{ title?, content? }` — owner only |
+| PUT | `/note/:id` | `{ title?, content?, tags? }` — owner only |
 | DELETE | `/note/:id` | owner only |
 | POST/PUT/DELETE | `/note/:id/items[/:itemId]` | add/edit/delete a to-do item — owner only |
 | PUT | `/note/:id/sharing` | `{ visibility, userIds? }` — owner only, see "Sharing model" above |
@@ -257,12 +291,45 @@ above), guest-owned content is capped **globally**, not per-visitor:
   `color-mix`), a pin (`::before`) and a colored accent strip (`::after`)
   — while the card body itself stays on the normal dark `--surface-1`, per
   "still dark, but with the feeling of actually opening a sticker."
+- **Type-ahead without losing focus** (the one real architectural
+  constraint here): the app renders by replacing `#app.innerHTML`, so
+  calling `render()` on each keystroke would destroy the very `<input>`
+  being typed into and drop focus/caret after one character. Both the tag
+  editor and the search box therefore use `setHtml()` (`dom-utils.ts`) to
+  rewrite **only** their dropdown/chip/cloud containers, never the input.
+  Any future type-ahead must follow the same rule.
+- **No debounce anywhere, deliberately**: both type-aheads filter
+  *already-fetched* data client-side — tag suggestions from `state.myTags`
+  (one `GET /note/tags` per page load), search suggestions from
+  `state.suggestPool`. So they're instant, fire zero requests per
+  keystroke, and have no in-flight-race bookkeeping. `suggestPool` is a
+  snapshot of the current filter's notes taken only on *unsearched* loads,
+  so suggestions don't progressively collapse into the results as you type.
+- **Tag editor** (`renderTagEditor`/`attachTagEditorHandlers`, shared by the
+  create form and the detail view via a `ns` id prefix + `getTags`/`setTags`
+  hooks): chips with ✕, Enter/comma to add, Backspace-on-empty removes the
+  last one, and the cloud below shows the 5 most-used tags — narrowing to
+  matches as you type, per spec. In the create form tags are local
+  (`state.draftTags`) until submit; in the detail view each change PUTs
+  optimistically and refreshes the cloud's counts.
 - **Sharing panel**: `VISIBILITY_OPTIONS` (`notes-api.ts`) drives a radio
   card list with per-option help text (`.visibility-option`); picking
   `specific` reveals a checkbox "chip" list (`.user-checkbox`) fed by
   `GET /user`. Changing the radio/checkboxes only updates local
   `state.sharingDraft` and re-renders — no API call until "Save sharing" is
   clicked (`PUT /note/:id/sharing`).
+- **Every path into the detail view must call `primeSharingState(note)`.**
+  There are exactly two (`openNote()` and the create-note submit handler);
+  both do. It sets `state.sharingDraft` *and* kicks off the `GET /user`
+  fetch. Postmortem — this was a real reported bug: the create handler used
+  to assemble the detail view by hand and skipped the fetch, so
+  `state.registeredUsers` stayed `null`, which is exactly the value that
+  renders "Loading users…". Result: on any freshly-pinned note the
+  "Specific people" picker hung on that message forever — no request in
+  flight, no error, nothing to debug from — while the same note worked fine
+  after closing and reopening it (which routes through `openNote`). Hence
+  the single shared function instead of two hand-rolled setups. If a third
+  entry point ever appears, route it through `primeSharingState` too.
 - Clicking a sticker opens an in-page detail view (no navigation) —
   `state.view` in `notes.ts` switches between `board` / `create` / `detail`
   and re-renders `#app`'s content, same single-page-app pattern as

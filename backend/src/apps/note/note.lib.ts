@@ -12,6 +12,20 @@ export function randomColor(): string {
 
 export const VALID_VISIBILITIES: NoteVisibility[] = ['private', 'public', 'guests', 'users', 'specific'];
 
+export const MAX_TAGS = 10;
+export const MAX_TAG_LENGTH = 24;
+
+// Tags are always stored normalized so `tags: { has: x }` lookups are exact
+// and case/whitespace variants can't split one tag into several.
+export function normalizeTags(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const cleaned = raw
+    .filter((t): t is string => typeof t === 'string')
+    .map((t) => t.trim().toLowerCase().replace(/\s+/g, '-').slice(0, MAX_TAG_LENGTH))
+    .filter((t) => t.length > 0);
+  return [...new Set(cleaned)].slice(0, MAX_TAGS);
+}
+
 const GUEST_NOTE_TTL_MS = 72 * 60 * 60 * 1000;
 
 // Lazily expires the guest's notes older than 72h — no cron job, just runs
@@ -62,6 +76,7 @@ export function serializeSummary(note: NoteWithRelations, currentUserId: string)
     type: note.type,
     title: note.title,
     color: note.color,
+    tags: note.tags,
     visibility: note.visibility,
     ownerUsername: note.owner.username,
     isMine: note.ownerId === currentUserId,

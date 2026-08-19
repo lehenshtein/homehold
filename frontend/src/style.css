@@ -453,6 +453,223 @@ footer {
   background: linear-gradient(160deg, #e3f4ff, #a9dcff);
 }
 
+/* ===== Search + type-ahead ===== */
+
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1 1 320px;
+  max-width: 460px;
+  padding: 0.15rem 0.5rem 0.15rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--border-soft);
+  background: var(--surface-2);
+}
+
+.search-icon {
+  font-size: 0.9rem;
+  opacity: 0.6;
+}
+
+.search-input {
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  padding: 0.55rem 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+}
+
+.search-input:focus {
+  outline: none;
+}
+
+.search-active-note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.typeahead-dropdown {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface-1);
+  border: 1px solid var(--border-soft);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.typeahead-dropdown:empty {
+  display: none;
+}
+
+.typeahead-item {
+  font: inherit;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.85rem;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.typeahead-item:hover {
+  background: color-mix(in srgb, var(--tone-primary) 14%, transparent);
+}
+
+.typeahead-kind {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tone-neutral) 22%, transparent);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* ===== Tags ===== */
+
+.tag-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+}
+
+.tag-editor-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.tag-chips.readonly {
+  margin-bottom: 1rem;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--tone-primary) 16%, transparent);
+  color: var(--tone-primary);
+  border: 1px solid color-mix(in srgb, var(--tone-primary) 35%, transparent);
+}
+
+.tag-chip-remove {
+  font: inherit;
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.tag-chip-remove:hover {
+  opacity: 1;
+}
+
+.tag-input {
+  font: inherit;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  background: var(--surface-1);
+  color: var(--text);
+}
+
+.tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.6rem;
+}
+
+.tag-cloud-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-right: 0.15rem;
+}
+
+.tag-suggestion {
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px dashed var(--border-soft);
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.tag-suggestion:hover {
+  background: color-mix(in srgb, var(--tone-primary) 14%, transparent);
+  color: var(--tone-primary);
+  border-color: color-mix(in srgb, var(--tone-primary) 45%, transparent);
+  border-style: solid;
+}
+
+.tag-count {
+  font-size: 0.65rem;
+  opacity: 0.6;
+}
+
+.tag-empty {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.sticker-tags {
+  font-size: 0.65rem;
+  opacity: 0.7;
+  word-break: break-word;
+}
+
 /* Pinboard: a dot-grid textured dark/warm "board" (not literal brown cork —
    works in both themes via --board-* tokens, and is deliberately larger
    than a typical widget so it reads as the centerpiece of the page). */

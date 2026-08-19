@@ -9,6 +9,9 @@ const router = express.Router();
 router.use(requireAuthentication);
 
 router.get('/', controller.list);
+// MUST stay above the '/:id' route below — Express matches in registration
+// order, so '/:id' would otherwise swallow '/tags' as an id.
+router.get('/tags', controller.listTags);
 router.post('/', controller.create);
 router.get('/:id', controller.read);
 router.put('/:id', controller.update);
