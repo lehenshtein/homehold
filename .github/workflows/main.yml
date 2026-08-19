@@ -1,12 +1,13 @@
-# NOTE: inert until a self-hosted GitHub Actions runner is registered for
-# this repo on the VPS (Settings -> Actions -> Runners -> New self-hosted
-# runner), mirroring the eneri / eneri-be setup. Until then, deploy manually:
-#   cd /root/homehold/homehold && git pull && docker compose up -d --build
+# Self-hosted runner is registered and running on the VPS
+# (actions.runner.lehenshtein-homehold.homehold.service). Deploys off `dev`,
+# not `main` (mirrors eneri/eneri-be, which keep `main` untouched and
+# deploy off develop/development). Push/merge into `dev` to trigger.
+# Manual deploy: cd /root/homehold/homehold && git pull && docker compose up -d --build
 name: Deploy Homehold
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
 
 jobs:
   deploy:
@@ -24,9 +25,9 @@ jobs:
 
       - name: Pull latest code
         run: |
-          git fetch origin main
-          git checkout main
-          git reset --hard origin/main
+          git fetch origin dev
+          git checkout dev
+          git reset --hard origin/dev
 
       - name: Build and restart containers
         run: docker compose up -d --build
