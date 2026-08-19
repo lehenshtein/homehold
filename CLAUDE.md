@@ -298,11 +298,24 @@ above), guest-owned content is capped **globally**, not per-visitor:
   editor and the search box therefore use `setHtml()` (`dom-utils.ts`) to
   rewrite **only** their dropdown/chip/cloud containers, never the input.
   Any future type-ahead must follow the same rule.
-- **No debounce anywhere, deliberately**: both type-aheads filter
+- **Mobile keyboards can't be trusted to fire Enter** (reported bug: on
+  Chrome/Android tags and search both appeared but "didn't work"). Android
+  IMEs frequently don't emit a `keydown` with `key === 'Enter'`, and because
+  the tag input sits inside the create `<form>`, tapping Go submitted the
+  form and created the note with no tags at all. Three defences, all needed:
+  1. an explicit **Add** button beside the tag input (never relies on a key
+     event), 2. **live debounced search** (400ms) so searching needs no Enter
+     at all, 3. the create-submit handler **rescues** any text still sitting
+     in the tag input so a premature submit can't silently drop it. Keep all
+     three if this area is touched; desktop-only testing will not catch this.
+- **No debounce anywhere except live search**: both type-aheads filter
   *already-fetched* data client-side — tag suggestions from `state.myTags`
   (one `GET /note/tags` per page load), search suggestions from
   `state.suggestPool`. So they're instant, fire zero requests per
-  keystroke, and have no in-flight-race bookkeeping. `suggestPool` is a
+  keystroke, and have no in-flight-race bookkeeping. The *search query
+  itself* is debounced (400ms) because it does hit the API — and it repaints
+  only `#corkboard` via `renderCorkboardInner()` + `wireStickerClicks()`,
+  never a full `render()`, so the input keeps focus mid-typing. `suggestPool` is a
   snapshot of the current filter's notes taken only on *unsearched* loads,
   so suggestions don't progressively collapse into the results as you type.
 - **Tag editor** (`renderTagEditor`/`attachTagEditorHandlers`, shared by the

@@ -608,13 +608,25 @@ footer {
   opacity: 1;
 }
 
+.tag-input-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
 .tag-input {
   font: inherit;
+  flex: 1;
+  min-width: 0;
   padding: 0.5rem 0.7rem;
   border-radius: 8px;
   border: 1px solid var(--border-soft);
   background: var(--surface-1);
   color: var(--text);
+}
+
+.tag-input-row .btn {
+  flex-shrink: 0;
 }
 
 .tag-cloud {

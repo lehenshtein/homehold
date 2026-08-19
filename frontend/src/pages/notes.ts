@@ -109,7 +109,7 @@ function renderTagCloud(query: string, selected: string[]): string {
 
   if (candidates.length === 0) {
     return q
-      ? `<span class="tag-empty">Press Enter to add “${escapeHtml(normalizeTag(query))}”</span>`
+      ? `<span class="tag-empty">Tap Add to create “${escapeHtml(normalizeTag(query))}”</span>`
       : '<span class="tag-empty">Your most-used tags will show up here</span>';
   }
 
@@ -129,7 +129,10 @@ function renderTagEditor(ns: string, tags: string[]): string {
     <div class="tag-editor">
       <label class="tag-editor-label">Tags</label>
       <div class="tag-chips" id="${ns}-chips">${renderTagChips(tags)}</div>
-      <input type="text" class="tag-input" id="${ns}-input" placeholder="Type a tag, press Enter…" maxlength="${MAX_TAG_LENGTH}" autocomplete="off" />
+      <div class="tag-input-row">
+        <input type="text" class="tag-input" id="${ns}-input" placeholder="Add a tag…" maxlength="${MAX_TAG_LENGTH}" autocomplete="off" enterkeyhint="done" />
+        <button type="button" class="btn btn-stroke btn-primary btn-sm" id="${ns}-add">Add</button>
+      </div>
       <div class="tag-cloud" id="${ns}-cloud">${renderTagCloud('', tags)}</div>
     </div>
   `;
@@ -189,7 +192,12 @@ function attachTagEditorHandlers(ns: string, hooks: TagEditorHooks): void {
     wireDynamicBits();
   });
 
+  document.getElementById(`${ns}-add`)?.addEventListener('click', () => addTag(input.value));
+
   input.addEventListener('keydown', (e) => {
+    // Desktop path. Mobile soft keyboards frequently DON'T report key==='Enter'
+    // here (Android IMEs send keyCode 229), which is why the Add button above
+    // exists and why the create form rescues any un-added text on submit.
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
       addTag(input.value);
@@ -281,7 +289,6 @@ function renderSticker(note: NoteSummary): string {
 }
 
 function renderBoard(): string {
-  const notesList = state.notes ?? [];
   return `
     <div class="notes-toolbar">
       <div class="notes-filters">
@@ -298,22 +305,26 @@ function renderBoard(): string {
       <div class="search-box">
         <span class="search-icon" aria-hidden="true">🔍</span>
         <input type="text" id="note-search-input" class="search-input" placeholder="Search titles and tags…" value="${escapeHtml(state.search)}" autocomplete="off" />
-        ${state.search ? '<button type="button" class="btn btn-text btn-neutral btn-sm" id="clear-search">Clear</button>' : ''}
+        <button type="button" class="btn btn-text btn-neutral btn-sm" id="clear-search"${state.search ? '' : ' hidden'}>Clear</button>
         <div class="typeahead-dropdown" id="search-suggestions"></div>
       </div>
-      ${state.search ? `<span class="search-active-note">Showing results for “${escapeHtml(state.search)}”</span>` : ''}
+      <span class="search-active-note" id="search-status">${state.search ? `Showing results for “${escapeHtml(state.search)}”` : ''}</span>
     </div>
     ${state.error ? `<p class="auth-message auth-message-error">${escapeHtml(state.error)}</p>` : ''}
     ${state.info ? `<p class="auth-message auth-message-info">${escapeHtml(state.info)}</p>` : ''}
-    <div class="corkboard">
-      ${state.notes === null
-        ? '<p class="corkboard-empty">Loading…</p>'
-        : notesList.length === 0
-          ? `<p class="corkboard-empty">${state.search ? 'Nothing matches that search.' : 'No notes here yet — pin one!'}</p>`
-          : notesList.map(renderSticker).join('')
-      }
-    </div>
+    <div class="corkboard" id="corkboard">${renderCorkboardInner()}</div>
   `;
+}
+
+// Split out so live search can repaint ONLY the board via setHtml() — a full
+// render() would destroy the search <input> mid-typing and drop focus.
+function renderCorkboardInner(): string {
+  const notesList = state.notes ?? [];
+  if (state.notes === null) return '<p class="corkboard-empty">Loading…</p>';
+  if (notesList.length === 0) {
+    return `<p class="corkboard-empty">${state.search ? 'Nothing matches that search.' : 'No notes here yet — pin one!'}</p>`;
+  }
+  return notesList.map(renderSticker).join('');
 }
 
 function renderCreateForm(): string {
@@ -426,14 +437,14 @@ function renderDetail(): string {
         <span class="note-detail-author">by ${escapeHtml(note.ownerUsername)}</span>
       </div>
 
+      ${body}
+
       ${isOwner
         ? renderTagEditor('detail-tags', note.tags)
         : (note.tags.length > 0
             ? `<div class="tag-chips readonly">${note.tags.map((t) => `<span class="tag-chip">#${escapeHtml(t)}</span>`).join('')}</div>`
             : '')
       }
-
-      ${body}
 
       ${renderSharingPanel()}
 
@@ -647,6 +658,17 @@ function attachGateHandlers(): void {
   });
 }
 
+// Sticker click handlers, re-bound whenever the board's markup is replaced
+// (full render OR the surgical live-search repaint).
+function wireStickerClicks(): void {
+  document.querySelectorAll<HTMLButtonElement>('.sticker').forEach((sticker) => {
+    sticker.addEventListener('click', () => {
+      const noteId = sticker.dataset.noteId;
+      if (noteId) void openNote(noteId);
+    });
+  });
+}
+
 function attachBoardHandlers(): void {
   document.getElementById('notes-logout-button')?.addEventListener('click', () => {
     logout();
@@ -679,20 +701,39 @@ function attachBoardHandlers(): void {
     render();
   });
 
-  document.querySelectorAll<HTMLButtonElement>('.sticker').forEach((sticker) => {
-    sticker.addEventListener('click', () => {
-      const noteId = sticker.dataset.noteId;
-      if (noteId) void openNote(noteId);
-    });
-  });
+  wireStickerClicks();
 
   // --- search box ---
   const searchInput = document.getElementById('note-search-input') as HTMLInputElement | null;
   if (searchInput) {
-    const commitSearch = (value: string): void => {
+    // Repaints ONLY the board + status text, leaving the search input (and
+    // its focus/caret) untouched. Used by live search; a full render() here
+    // would kill typing mid-word — same constraint as the tag editor.
+    const refreshBoardOnly = async (): Promise<void> => {
+      try {
+        await loadNotes();
+      } catch (err) {
+        state.error = err instanceof Error ? err.message : 'Search failed';
+      }
+      setHtml('corkboard', renderCorkboardInner());
+      const status = document.getElementById('search-status');
+      if (status) status.textContent = state.search ? `Showing results for \u201C${state.search}\u201D` : '';
+      document.getElementById('clear-search')?.toggleAttribute('hidden', !state.search);
+      wireStickerClicks();
+    };
+
+    let searchTimer: ReturnType<typeof setTimeout> | undefined;
+    const commitSearch = (value: string, immediate = true): void => {
       state.search = value;
       setHtml('search-suggestions', '');
-      void withBusy(loadNotes);
+      if (searchTimer) clearTimeout(searchTimer);
+      if (immediate) {
+        void refreshBoardOnly();
+      } else {
+        // Debounced live search: no Enter required, which matters because
+        // mobile soft keyboards don't reliably fire keydown Enter at all.
+        searchTimer = setTimeout(() => void refreshBoardOnly(), 400);
+      }
     };
 
     const wireSuggestionClicks = (): void => {
@@ -714,6 +755,7 @@ function attachBoardHandlers(): void {
     searchInput.addEventListener('input', () => {
       setHtml('search-suggestions', renderSearchSuggestions(searchInput.value));
       wireSuggestionClicks();
+      commitSearch(searchInput.value, false);
     });
 
     searchInput.addEventListener('keydown', (e) => {
@@ -751,7 +793,14 @@ function attachBoardHandlers(): void {
       ? formValue(form, 'items').split('\n').map((s) => s.trim()).filter(Boolean)
       : undefined;
 
+    // Rescue a tag that was typed but never committed: on mobile the soft
+    // keyboard's Go/Done key can submit the form before the tag is added, so
+    // anything still sitting in the input would otherwise be silently lost.
+    const pendingTag = normalizeTag(
+      (document.getElementById('create-tags-input') as HTMLInputElement | null)?.value ?? ''
+    );
     const tags = [...state.draftTags];
+    if (pendingTag && !tags.includes(pendingTag) && tags.length < MAX_TAGS) tags.push(pendingTag);
 
     void withBusy(async () => {
       const created = await createNote({ type: noteType, title, content, items, tags });
