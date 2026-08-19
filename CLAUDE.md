@@ -75,48 +75,43 @@ Do not add project-specific tables to `schema.prisma` until this is decided.
 
 ## Deploy
 
-Mirrors the `eneri` / `eneri-be` deploy pattern used on the same VPS:
-self-hosted GitHub Actions runner, push to `main` -> `docker compose up -d
---build` for all three services, health check against `/ping` (backend,
-port 6101) and `/` (frontend, port 6100), rollback via `pre-deploy-*` git
-tags. See `.github/workflows/main.yml`.
+Mirrors the `eneri` / `eneri-be` deploy pattern used on the same VPS: those
+two keep `main` untouched and deploy off a separate branch
+(`develop`/`development`) — homehold follows the same split, deploying off
+**`dev`**, not `main`.
 
-**This workflow is currently inert** — no self-hosted runner is registered
-for this repo yet. Register one via GitHub repo Settings -> Actions ->
-Runners on the VPS before pushes will auto-deploy.
+- Self-hosted GitHub Actions runner (registered on the VPS as
+  `/root/actions-runner-homehold`, systemd service
+  `actions.runner.lehenshtein-homehold.homehold.service`) runs
+  `docker compose up -d --build` for all three services on push to `dev`
+  (see `.github/workflows/main.yml`)
+- Health check against `/ping` (backend, port 6101) and `/` (frontend,
+  port 6100)
+- Rollback via `pre-deploy-*` git tags
+- **The `dev` branch doesn't exist yet** — create/push it to trigger the
+  first automated deploy; until then use the manual steps below
 
-**Manual deploy in the meantime**, on the VPS:
+**Manual deploy**, on the VPS:
 ```bash
-cd /root/homehold/homehold   # clone here first if not already present
-cp .env.example .env && cp backend/.env.example backend/.env   # fill in real secrets
+cd /root/homehold/homehold
 git pull
 docker compose up -d --build
 ```
+(`.env` / `backend/.env` already exist on the VPS with generated secrets —
+don't overwrite them with `.env.example` again.)
 
-### Nginx (manual VPS step, not yet done)
+### Nginx / TLS — partially done
 
-Add server blocks on the VPS's host-level nginx:
-```nginx
-server {
-    listen 80;
-    server_name homehold.website;
-    location / {
-        proxy_pass http://127.0.0.1:6100;
-    }
-}
+Live: `/etc/nginx/sites-available/homehold.conf` (symlinked into
+`sites-enabled/`) proxies `homehold.website` -> `127.0.0.1:6100`, HTTPS via
+a Let's Encrypt cert (certbot, auto-renews, expires 2026-11-17). `eneri`/
+`dreich`/`salt-ash`/`n8n` nginx configs were not touched.
 
-server {
-    listen 80;
-    server_name api.homehold.website;
-    location / {
-        proxy_pass http://127.0.0.1:6101;
-    }
-}
-# then TLS via certbot / existing cert flow, same as eneri.com.ua / api.eneri.com.ua
-```
-`api.homehold.website` mirrors the `eneri.com.ua` / `api.eneri.com.ua`
-split — needs a Cloudflare DNS record added for the `api` subdomain
-(not done yet).
+**Not done**: `api.homehold.website` -> `127.0.0.1:6101`. No Cloudflare DNS
+record exists yet for the `api` subdomain, so the backend isn't publicly
+exposed — only reachable at `127.0.0.1:6101` on the VPS itself. Add the DNS
+record first, then add the nginx block + cert the same way as the
+frontend's.
 
 ## Roadmap
 
