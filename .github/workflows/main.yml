@@ -1,7 +1,7 @@
 # NOTE: inert until a self-hosted GitHub Actions runner is registered for
 # this repo on the VPS (Settings -> Actions -> Runners -> New self-hosted
 # runner), mirroring the eneri / eneri-be setup. Until then, deploy manually:
-#   cd /root/web/homehold && git pull && docker compose up -d --build
+#   cd /root/homehold/homehold && git pull && docker compose up -d --build
 name: Deploy Homehold
 
 on:
@@ -14,7 +14,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: /root/web/homehold
+        working-directory: /root/homehold/homehold
 
     steps:
       - name: Tag pre-deploy commit
@@ -54,4 +54,4 @@ jobs:
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
             -d chat_id=${{ secrets.TELEGRAM_CHANNEL_ID }} \
             -d parse_mode=HTML \
-            -d text="❌ <b>Homehold deploy failed</b>%0A${{ github.event.head_commit.message }}%0A%0ARollback:%0A<code>cd /root/web/homehold%0Agit tag -l \"pre-deploy-*\"%0Agit reset --hard TAG_NAME%0Adocker compose up -d --build</code>"
+            -d text="❌ <b>Homehold deploy failed</b>%0A${{ github.event.head_commit.message }}%0A%0ARollback:%0A<code>cd /root/homehold/homehold%0Agit tag -l \"pre-deploy-*\"%0Agit reset --hard TAG_NAME%0Adocker compose up -d --build</code>"

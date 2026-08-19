@@ -87,7 +87,7 @@ Runners on the VPS before pushes will auto-deploy.
 
 **Manual deploy in the meantime**, on the VPS:
 ```bash
-cd /root/web/homehold   # clone here first if not already present
+cd /root/homehold/homehold   # clone here first if not already present
 cp .env.example .env && cp backend/.env.example backend/.env   # fill in real secrets
 git pull
 docker compose up -d --build
