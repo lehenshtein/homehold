@@ -151,22 +151,32 @@ function render(): void {
   attachHandlers();
 }
 
-function withBusy(action: () => Promise<void>): (e: Event) => void {
-  return async (e: Event) => {
-    e.preventDefault();
-    state.busy = true;
-    state.error = null;
-    state.info = null;
+// Runs `action`, toggling busy state and re-rendering around it. Re-rendering
+// rebuilds the whole #app subtree (including a fresh <form>), so any values
+// `action` needs from the submitted form MUST be read out and captured
+// *before* calling this — not looked up from the DOM inside `action` itself,
+// since by then render() has already replaced the form with an empty one.
+async function withBusy(action: () => Promise<void>): Promise<void> {
+  state.busy = true;
+  state.error = null;
+  state.info = null;
+  render();
+  try {
+    await action();
+  } catch (err) {
+    state.error = err instanceof Error ? err.message : 'Something went wrong';
+  } finally {
+    state.busy = false;
     render();
-    try {
-      await action();
-    } catch (err) {
-      state.error = err instanceof Error ? err.message : 'Something went wrong';
-    } finally {
-      state.busy = false;
-      render();
-    }
-  };
+  }
+}
+
+function onFormSubmit(formId: string, action: (form: HTMLFormElement) => Promise<void>): void {
+  document.getElementById(formId)?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    void withBusy(() => action(form));
+  });
 }
 
 function formValue(form: HTMLFormElement, field: string): string {
@@ -209,37 +219,25 @@ function attachHandlers(): void {
     render();
   });
 
-  document.getElementById('login-form')?.addEventListener(
-    'submit',
-    withBusy(async () => {
-      const form = document.getElementById('login-form') as HTMLFormElement;
-      await login(formValue(form, 'username'), formValue(form, 'password'));
-      state.user = await fetchMe();
-      state.panel = null;
-      state.info = 'Logged in.';
-    })
-  );
+  onFormSubmit('login-form', async (form) => {
+    await login(formValue(form, 'username'), formValue(form, 'password'));
+    state.user = await fetchMe();
+    state.panel = null;
+    state.info = 'Logged in.';
+  });
 
-  document.getElementById('change-password-form')?.addEventListener(
-    'submit',
-    withBusy(async () => {
-      const form = document.getElementById('change-password-form') as HTMLFormElement;
-      await changePassword(formValue(form, 'currentPassword'), formValue(form, 'newPassword'));
-      state.panel = null;
-      state.info = 'Password updated.';
-    })
-  );
+  onFormSubmit('change-password-form', async (form) => {
+    await changePassword(formValue(form, 'currentPassword'), formValue(form, 'newPassword'));
+    state.panel = null;
+    state.info = 'Password updated.';
+  });
 
-  document.getElementById('create-user-form')?.addEventListener(
-    'submit',
-    withBusy(async () => {
-      const form = document.getElementById('create-user-form') as HTMLFormElement;
-      const username = formValue(form, 'username');
-      await createUser(username, formValue(form, 'password'));
-      state.panel = null;
-      state.info = `Account "${username}" created.`;
-    })
-  );
+  onFormSubmit('create-user-form', async (form) => {
+    const username = formValue(form, 'username');
+    await createUser(username, formValue(form, 'password'));
+    state.panel = null;
+    state.info = `Account "${username}" created.`;
+  });
 }
 
 async function init(): Promise<void> {
