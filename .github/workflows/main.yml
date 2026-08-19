@@ -1,0 +1,57 @@
+# NOTE: inert until a self-hosted GitHub Actions runner is registered for
+# this repo on the VPS (Settings -> Actions -> Runners -> New self-hosted
+# runner), mirroring the eneri / eneri-be setup. Until then, deploy manually:
+#   cd /root/web/homehold && git pull && docker compose up -d --build
+name: Deploy Homehold
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    defaults:
+      run:
+        working-directory: /root/web/homehold
+
+    steps:
+      - name: Tag pre-deploy commit
+        run: |
+          CURRENT=$(git rev-parse HEAD)
+          git tag -f "pre-deploy-$(date +%Y%m%d-%H%M%S)" $CURRENT
+
+      - name: Pull latest code
+        run: |
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+
+      - name: Build and restart containers
+        run: docker compose up -d --build
+
+      - name: Health check
+        run: |
+          sleep 10
+          curl -sf http://localhost:3100/ping || (docker compose logs --tail 30 && exit 1)
+          curl -sf http://localhost:4100 || (docker compose logs --tail 30 && exit 1)
+
+      - name: Clean up old images
+        run: docker image prune -f
+
+      - name: Notify success
+        if: success()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d chat_id=${{ secrets.TELEGRAM_CHANNEL_ID }} \
+            -d parse_mode=HTML \
+            -d text="✅ <b>Homehold deployed</b>%0A${{ github.event.head_commit.message }}"
+
+      - name: Notify failure
+        if: failure()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d chat_id=${{ secrets.TELEGRAM_CHANNEL_ID }} \
+            -d parse_mode=HTML \
+            -d text="❌ <b>Homehold deploy failed</b>%0A${{ github.event.head_commit.message }}%0A%0ARollback:%0A<code>cd /root/web/homehold%0Agit tag -l \"pre-deploy-*\"%0Agit reset --hard TAG_NAME%0Adocker compose up -d --build</code>"
